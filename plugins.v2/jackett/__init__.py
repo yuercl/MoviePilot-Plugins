@@ -16,7 +16,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.05"
+    plugin_version = "1.06"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -85,6 +85,10 @@ class Jackett(_PluginBase):
             
             # 添加索引器到MoviePilot
             sites_helper = SitesHelper()
+            
+            # 先获取已有的索引器
+            existing_indexers = sites_helper.get_indexers()
+            
             for indexer in indexers:
                 indexer_id = indexer.get("id")
                 if not indexer_id:
@@ -92,6 +96,14 @@ class Jackett(_PluginBase):
                     
                 if self._indexers and indexer_id not in self._indexers:
                     print(f"【{self.plugin_name}】跳过未选择的索引器: {indexer.get('name')}")
+                    continue
+                
+                domain = f"jackett_{indexer_id}"
+                
+                # 检查是否已存在
+                if domain in existing_indexers:
+                    print(f"【{self.plugin_name}】索引器已存在，跳过添加: {indexer.get('name')}")
+                    self._added_indexers.append(domain)
                     continue
                     
                 # 格式化为MoviePilot支持的格式
@@ -101,10 +113,9 @@ class Jackett(_PluginBase):
                     
                 # 添加到MoviePilot
                 try:
-                    domain = f"jackett_{indexer_id}"
                     sites_helper.add_indexer(domain=domain, indexer=mp_indexer)
                     self._added_indexers.append(domain)
-                    print(f"【{self.plugin_name}】成功添加索引器: {indexer.get('name')}")
+                    print(f"【{self.plugin_name}】成功添加索引器: {indexer.get('name')} -> {domain}")
                 except Exception as e:
                     print(f"【{self.plugin_name}】添加索引器失败: {indexer.get('name')} - {str(e)}")
             
@@ -188,17 +199,22 @@ class Jackett(_PluginBase):
         try:
             indexer_id = jackett_indexer.get("id")
             indexer_name = jackett_indexer.get("name")
+            indexer_type = jackett_indexer.get("type")
+            
+            # 使用原始路径作为domain，确保API请求能正确路由
+            full_api_url = f"{self._host}/api/v2.0/indexers/{indexer_id}"
             
             # 基本配置
             mp_indexer = {
                 "id": f"jackett_{indexer_id}",
                 "name": f"[Jackett] {indexer_name}",
-                "domain": f"{self._host}/api/v2.0/indexers/{indexer_id}",
+                "domain": full_api_url,
                 "encoding": "UTF-8",
-                "public": jackett_indexer.get("type") == "public",
-                "proxy": True,
+                "public": indexer_type == "public",
+                "proxy": False,  # 设为False，因为Jackett已经是代理
                 "result_num": 100,
-                "timeout": 30
+                "timeout": 30,
+                "level": 2
             }
             
             # 搜索配置
@@ -216,7 +232,7 @@ class Jackett(_PluginBase):
                 }
             }
             
-            # 种子解析配置 - 优化格式以适应MoviePilot V2
+            # 种子解析配置 - 更加符合Jackett的XML格式
             mp_indexer["torrents"] = {
                 "list": {
                     "selector": "item"
@@ -248,6 +264,10 @@ class Jackett(_PluginBase):
                     },
                     "grabs": {
                         "selector": "grabs"
+                    },
+                    "categories": {
+                        "selector": "category",
+                        "multiple": True
                     },
                     "downloadvolumefactor": {
                         "case": {
@@ -346,15 +366,18 @@ class Jackett(_PluginBase):
                 'component': 'VAlert',
                 'props': {
                     'type': 'info',
-                    'text': '此插件用于对接Jackett搜索器，将Jackett中配置的索引器添加到MoviePilot的内建搜索中。需要先在Jackett中添加并配置好索引器，启用插件并保存配置后，即可在搜索中使用这些索引器。'
+                    'text': '此插件用于对接Jackett搜索器，将Jackett中配置的索引器添加到MoviePilot的内建索引中。需要先在Jackett中添加并配置好索引器，启用插件并保存配置后，即可在搜索中使用这些索引器。',
+                    'class': 'mb-4'
                 }
             },
             {
                 'component': 'VBtn',
                 'props': {
                     'color': 'primary',
-                    'text': '查看索引器列表'
+                    'block': True,
+                    'class': 'mb-4'
                 },
+                'text': '刷新索引器列表',
                 'events': [
                     {
                         'name': 'click',
@@ -363,39 +386,37 @@ class Jackett(_PluginBase):
                 ]
             },
             {
-                'component': 'VDivider',
+                'component': 'VCard',
                 'props': {
-                    'class': 'my-3'
-                }
-            },
-            {
-                'component': 'VRow',
+                    'class': 'mb-4'
+                },
                 'content': [
                     {
-                        'component': 'VCol',
+                        'component': 'VCardTitle',
                         'props': {
-                            'cols': 12
+                            'class': 'primary--text'
                         },
-                        'content': [
+                        'text': '索引器列表'
+                    },
+                    {
+                        'component': 'VDataTable',
+                        'props': {
+                            'headers': [
+                                {'text': 'ID', 'value': 'id'},
+                                {'text': '索引器名称', 'value': 'name'},
+                                {'text': '类型', 'value': 'type'}
+                            ],
+                            'items': [],
+                            'loading': False,
+                            'loadingText': '加载中...',
+                            'noDataText': '暂无索引器',
+                            'itemsPerPage': 10,
+                            'class': 'indexer-table'
+                        },
+                        'events': [
                             {
-                                'component': 'VTable',
-                                'props': {
-                                    'headers': [
-                                        {'title': 'ID', 'key': 'id'},
-                                        {'title': '索引器名称', 'key': 'name'},
-                                        {'title': '类型', 'key': 'type'}
-                                    ],
-                                    'items': [],
-                                    'loading': true,
-                                    'loadingText': '加载中...',
-                                    'class': 'indexer-table'
-                                },
-                                'events': [
-                                    {
-                                        'name': 'mounted',
-                                        'value': 'this.get_indexers().then(res => { if(res.code === 0) { this.items = res.data.map(item => ({ id: item.value, name: item.text, type: "Jackett" })); this.loading = false; } })'
-                                    }
-                                ]
+                                'name': 'mounted',
+                                'value': 'this.get_indexers().then(res => { if(res.code === 0) { this.items = res.data.map(item => ({ id: item.value, name: item.text, type: "Jackett" })); } })'
                             }
                         ]
                     }
@@ -448,7 +469,7 @@ class Jackett(_PluginBase):
         """
         # 确保返回明确的布尔值
         state = bool(self._enabled and self._host and self._api_key)
-        print(f"【{self.plugin_name}】get_state返回: {state}")
+        print(f"【{self.plugin_name}】get_state返回: {state}, enabled={self._enabled}, host={bool(self._host)}, api_key={bool(self._api_key)}")
         return state
 
     def stop_service(self) -> None:
