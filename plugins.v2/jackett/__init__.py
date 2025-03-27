@@ -18,7 +18,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.07"
+    plugin_version = "1.08"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -176,7 +176,7 @@ class Jackett(_PluginBase):
             self._host = self._host[:-1]
             
         try:
-            # 获取Cookie
+            # 设置请求头
             headers = {
                 "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36",
@@ -184,9 +184,11 @@ class Jackett(_PluginBase):
                 "Accept": "application/json, text/javascript, */*; q=0.01"
             }
             
+            # 创建会话 - 使用正确的RequestUtils方式
             if not self._session:
-                self._session = RequestUtils(headers=headers).get_session()
-                
+                print(f"【{self.plugin_name}】初始化会话...")
+                self._session = {}  # 使用字典保存cookie
+            
             # 处理登录
             if self._password:
                 try:
@@ -194,15 +196,15 @@ class Jackett(_PluginBase):
                     login_url = f"{self._host}/UI/Dashboard"
                     login_data = {"password": self._password}
                     
-                    login_response = RequestUtils(headers=headers, session=self._session).post_res(
+                    login_response = RequestUtils(headers=headers).post_res(
                         url=login_url, 
                         data=login_data,
                         params={"password": self._password}
                     )
                     
                     if login_response and login_response.status_code == 200:
-                        self._cookies = self._session.cookies.get_dict()
-                        print(f"【{self.plugin_name}】Jackett登录成功，获取到Cookie")
+                        self._cookies = login_response.cookies.get_dict()
+                        print(f"【{self.plugin_name}】Jackett登录成功，获取到Cookie: {self._cookies}")
                     else:
                         print(f"【{self.plugin_name}】Jackett登录失败: 状态码 {login_response.status_code if login_response else 'None'}")
                 except Exception as e:
@@ -214,7 +216,9 @@ class Jackett(_PluginBase):
             
             response = None
             try:
-                response = RequestUtils(headers=headers, session=self._session, cookies=self._cookies).get_res(indexer_query_url)
+                # 使用正确的RequestUtils调用
+                response = RequestUtils(headers=headers, cookies=self._cookies).get_res(indexer_query_url)
+                print(f"【{self.plugin_name}】收到响应: {response.status_code if response else 'None'}")
             except Exception as e:
                 print(f"【{self.plugin_name}】请求索引器列表异常: {str(e)}")
             
@@ -236,6 +240,8 @@ class Jackett(_PluginBase):
                 return indexers
             except Exception as e:
                 print(f"【{self.plugin_name}】解析索引器列表JSON异常: {str(e)}")
+                if response and hasattr(response, 'text'):
+                    print(f"【{self.plugin_name}】响应内容: {response.text[:200]}...")
                 return []
                 
         except Exception as e:
@@ -259,7 +265,7 @@ class Jackett(_PluginBase):
                 "encoding": "UTF-8",
                 "public": indexer_type == "public",
                 "proxy": False,  # 设为False，因为Jackett已经是代理
-                "parser": "Jackett",  # 指定使用自定义解析器
+                "parser": "Torznab",  # 使用Torznab解析器而不是Jackett
                 "result_num": 100,
                 "timeout": 30,
                 "level": 2
@@ -280,7 +286,7 @@ class Jackett(_PluginBase):
                 }
             }
             
-            # 种子解析配置 - 适应Jackett的XML格式
+            # 种子解析配置 - 使用标准Torznab格式
             mp_indexer["torrents"] = {
                 "list": {
                     "selector": "item"
@@ -305,23 +311,24 @@ class Jackett(_PluginBase):
                         "selector": "pubDate"
                     },
                     "seeders": {
-                        "selector": "seeders"
+                        "selector": "torznab|attr[name=seeders]"
                     },
                     "leechers": {
-                        "selector": "peers"
+                        "selector": "torznab|attr[name=peers]"
                     },
                     "grabs": {
-                        "selector": "grabs"
+                        "selector": "torznab|attr[name=grabs]"
                     },
                     "imdbid": {
-                        "selector": "jackettindexer",
-                        "attribute": "imdbid"
+                        "selector": "torznab|attr[name=imdbid]"
                     },
                     "downloadvolumefactor": {
-                        "text": "1"
+                        "selector": "torznab|attr[name=downloadvolumefactor]",
+                        "default": "1"
                     },
                     "uploadvolumefactor": {
-                        "text": "1"
+                        "selector": "torznab|attr[name=uploadvolumefactor]",
+                        "default": "1"
                     }
                 }
             }
@@ -433,6 +440,21 @@ class Jackett(_PluginBase):
                     {
                         'name': 'click',
                         'value': 'this.get_indexers()'
+                    }
+                ]
+            },
+            {
+                'component': 'VBtn',
+                'props': {
+                    'color': 'success',
+                    'block': True,
+                    'class': 'mb-4'
+                },
+                'text': '重新加载索引器到搜索系统',
+                'events': [
+                    {
+                        'name': 'click',
+                        'value': 'this.$axios.get("/api/v1/plugin/jackett/reload").then(res => { if(res.data.code === 0) { this.$toast.success(res.data.message); } else { this.$toast.error(res.data.message); } })'
                     }
                 ]
             },
