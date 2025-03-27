@@ -16,7 +16,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.04"
+    plugin_version = "1.04beta1"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -144,22 +144,27 @@ class Jackett(_PluginBase):
                 "X-Api-Key": self._api_key,
                 "Accept": "application/json, text/javascript, */*; q=0.01"
             }
-            cookie = None
-            if self._password:
-                session = RequestUtils().get_session()
-                res = RequestUtils(headers=headers, session=session).post_res(
-                    url=f"{self._host}/UI/Dashboard", 
-                    data={"password": self._password},
-                    params={"password": self._password}
-                )
-                if res and session.cookies:
-                    cookie = session.cookies.get_dict()
-                    print(f"【{self.plugin_name}】获取到Cookie: {cookie}")
             
-            # 使用 Jackett API 获取所有配置的索引器
+            # 先尝试不使用密码连接
             indexer_query_url = f"{self._host}/api/v2.0/indexers?configured=true"
             print(f"【{self.plugin_name}】请求索引器: {indexer_query_url}")
-            response = RequestUtils(headers=headers, cookies=cookie).get_res(indexer_query_url)
+            
+            # 直接使用RequestUtils，不调用get_session
+            response = RequestUtils(headers=headers).get_res(indexer_query_url)
+            
+            # 如果失败且有密码，尝试先获取cookie
+            if (not response or response.status_code != 200) and self._password:
+                print(f"【{self.plugin_name}】直接请求失败，尝试使用密码登录...")
+                # 这里使用另一种方式获取cookie
+                login_url = f"{self._host}/UI/Dashboard"
+                login_data = {"password": self._password}
+                auth_response = RequestUtils(headers=headers).post_res(url=login_url, data=login_data)
+                
+                if auth_response and auth_response.cookies:
+                    cookies = auth_response.cookies.get_dict()
+                    print(f"【{self.plugin_name}】获取到Cookie: {cookies}")
+                    # 使用获取到的cookies再次请求
+                    response = RequestUtils(headers=headers, cookies=cookies).get_res(indexer_query_url)
             
             if not response:
                 print(f"【{self.plugin_name}】无法连接到Jackett服务器")
@@ -170,6 +175,7 @@ class Jackett(_PluginBase):
                 return []
             
             indexers = response.json()
+            print(f"【{self.plugin_name}】成功获取到{len(indexers)}个索引器")
             return indexers
         except Exception as e:
             print(f"【{self.plugin_name}】获取Jackett索引器异常: {str(e)}")
@@ -467,7 +473,10 @@ class Jackett(_PluginBase):
         """
         获取插件状态
         """
-        return self._enabled and self._host and self._api_key
+        # 确保返回明确的布尔值
+        state = bool(self._enabled and self._host and self._api_key)
+        print(f"【{self.plugin_name}】get_state返回: {state}")
+        return state
 
     def stop_service(self) -> None:
         """
