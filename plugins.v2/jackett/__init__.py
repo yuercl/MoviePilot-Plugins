@@ -17,7 +17,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.01"
+    plugin_version = "1.02"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -53,7 +53,7 @@ class Jackett(_PluginBase):
         if self._enabled and self._host and self._api_key:
             self.register_events()
 
-    def get_form(self) -> List[dict]:
+    def get_form(self) -> tuple:
         """
         获取配置表单
         """
@@ -140,7 +140,13 @@ class Jackett(_PluginBase):
                                             'items': [],
                                             'persistent-hint': True,
                                             'hint': '留空则使用全部索引器'
-                                        }
+                                        },
+                                        'events': [
+                                            {
+                                                'name': 'mounted',
+                                                'value': 'this.get_indexers'
+                                            }
+                                        ]
                                     }
                                 ]
                             }
@@ -148,7 +154,12 @@ class Jackett(_PluginBase):
                     }
                 ]
             }
-        ]
+        ], {
+            "enabled": False,
+            "host": "",
+            "api_key": "",
+            "indexers": []
+        }
 
     def get_page(self) -> List[dict]:
         """
@@ -181,13 +192,15 @@ class Jackett(_PluginBase):
         """
         获取API接口
         """
-        return [{
-            "path": "/jackett/indexers",
-            "endpoint": self.get_indexers,
-            "methods": ["GET"],
-            "summary": "获取Jackett索引器列表",
-            "description": "获取已配置的Jackett索引器列表"
-        }]
+        return [
+            {
+                "path": "/jackett/indexers",
+                "endpoint": self.get_indexers,
+                "methods": ["GET"],
+                "summary": "获取Jackett索引器列表",
+                "description": "获取已配置的Jackett索引器列表"
+            }
+        ]
 
     def get_indexers(self):
         """
@@ -197,16 +210,22 @@ class Jackett(_PluginBase):
             return {"code": 1, "message": "请先配置Jackett"}
         
         try:
+            # 使用 Jackett API 获取所有配置的索引器
             response = RequestUtils(content_type="application/json").get_res(
-                f"{self._host}/api/v2.0/indexers/all/results/torznab/api?apikey={self._api_key}&t=indexers"
+                f"{self._host}/api/v2.0/indexers?configured=true&apikey={self._api_key}"
             )
             if response and response.status_code == 200:
-                indexers = response.json()
+                indexers = []
+                for indexer in response.json():
+                    indexers.append({
+                        "value": indexer["id"],
+                        "text": indexer["name"]
+                    })
                 return {"code": 0, "data": indexers}
             else:
-                return {"code": 1, "message": "获取索引器失败"}
+                return {"code": 1, "message": f"获取索引器失败: {response.status_code if response else '无响应'}"}
         except Exception as e:
-            return {"code": 1, "message": str(e)}
+            return {"code": 1, "message": f"获取索引器异常: {str(e)}"}
 
     def register_events(self):
         """
@@ -225,23 +244,51 @@ class Jackett(_PluginBase):
                 return
             
             try:
+                print(f"【{self.plugin_name}】开始搜索: {search_word}")
+                
                 # 构建搜索URL
                 search_url = f"{self._host}/api/v2.0/indexers/all/results?apikey={self._api_key}&Query={search_word}"
-                if self._indexers:
+                if self._indexers and len(self._indexers) > 0:
                     search_url += f"&Tracker={','.join(self._indexers)}"
                 
                 # 发送搜索请求
                 response = RequestUtils(content_type="application/json").get_res(search_url)
-                if response and response.status_code == 200:
-                    results = response.json().get("Results", [])
-                    
-                    # 发送搜索结果事件
+                if not response:
+                    print(f"【{self.plugin_name}】搜索请求失败: 无响应")
+                    return
+                
+                if response.status_code != 200:
+                    print(f"【{self.plugin_name}】搜索请求失败: HTTP {response.status_code}")
+                    return
+                
+                results = response.json().get("Results", [])
+                print(f"【{self.plugin_name}】搜索结果数量: {len(results)}")
+                
+                # 格式化搜索结果
+                formatted_results = []
+                for item in results:
+                    # 转换为MoviePilot期望的格式
+                    formatted_results.append({
+                        "title": item.get("Title", ""),
+                        "description": item.get("Description", ""),
+                        "enclosure": item.get("Link", ""),
+                        "size": item.get("Size", 0),
+                        "seeders": item.get("Seeders", 0),
+                        "peers": item.get("Peers", 0),
+                        "page_url": item.get("Details", ""),
+                        "indexer": item.get("Tracker", ""),
+                        "category": item.get("CategoryDesc", ""),
+                        "imdbid": item.get("Imdb", ""),
+                    })
+                
+                # 发送搜索结果事件
+                if formatted_results:
                     eventmanager.send_event(EventType.SearchTorrentResult, {
                         "search_word": search_word,
-                        "results": results
+                        "results": formatted_results
                     })
             except Exception as e:
-                print(f"搜索出错: {str(e)}")
+                print(f"【{self.plugin_name}】搜索出错: {str(e)}")
 
     def get_state(self) -> bool:
         """
