@@ -1,0 +1,14 @@
+{
+  "Jackett": {
+    "name": "Jackett搜索器",
+    "description": "支持 Jackett 搜索器，用于资源检索。",
+    "version": "1.01",
+    "icon": "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico",
+    "author": "jason",
+    "level": 2,
+    "labels": "搜索",
+    "history": {
+      "v1.0": "支持 Jackett 搜索器，实现资源检索功能"
+    }
+  }
+} 
