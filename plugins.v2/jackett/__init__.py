@@ -4,6 +4,8 @@ from app.utils.http import RequestUtils
 import json
 import os
 import time
+import xml.dom.minidom
+from urllib.parse import urljoin
 
 class Jackett(_PluginBase):
     """
@@ -16,7 +18,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.06"
+    plugin_version = "1.07"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -35,6 +37,9 @@ class Jackett(_PluginBase):
     _password = None
     _indexers = None
     _added_indexers = []
+    # 会话信息
+    _session = None
+    _cookies = None
 
     def init_plugin(self, config: dict = None) -> None:
         """
@@ -51,6 +56,10 @@ class Jackett(_PluginBase):
         self._api_key = config.get("api_key")
         self._password = config.get("password")
         self._indexers = config.get("indexers", [])
+        
+        # 初始化会话
+        self._session = None
+        self._cookies = None
         
         print(f"【{self.plugin_name}】插件初始化完成，状态: {self._enabled}")
         
@@ -87,7 +96,11 @@ class Jackett(_PluginBase):
             sites_helper = SitesHelper()
             
             # 先获取已有的索引器
-            existing_indexers = sites_helper.get_indexers()
+            existing_indexers = sites_helper.get_indexers() or {}
+            print(f"【{self.plugin_name}】现有索引器: {len(existing_indexers)}个")
+            
+            # 存储添加的索引器
+            new_added = []
             
             for indexer in indexers:
                 indexer_id = indexer.get("id")
@@ -102,10 +115,13 @@ class Jackett(_PluginBase):
                 
                 # 检查是否已存在
                 if domain in existing_indexers:
-                    print(f"【{self.plugin_name}】索引器已存在，跳过添加: {indexer.get('name')}")
-                    self._added_indexers.append(domain)
-                    continue
-                    
+                    print(f"【{self.plugin_name}】索引器已存在，将更新: {indexer.get('name')}")
+                    # 移除旧的
+                    try:
+                        sites_helper.remove_indexer(domain)
+                    except Exception as e:
+                        print(f"【{self.plugin_name}】移除旧索引器失败: {str(e)}")
+                
                 # 格式化为MoviePilot支持的格式
                 mp_indexer = self._format_indexer(indexer)
                 if not mp_indexer:
@@ -115,11 +131,12 @@ class Jackett(_PluginBase):
                 try:
                     sites_helper.add_indexer(domain=domain, indexer=mp_indexer)
                     self._added_indexers.append(domain)
+                    new_added.append(domain)
                     print(f"【{self.plugin_name}】成功添加索引器: {indexer.get('name')} -> {domain}")
                 except Exception as e:
                     print(f"【{self.plugin_name}】添加索引器失败: {indexer.get('name')} - {str(e)}")
             
-            print(f"【{self.plugin_name}】共添加了{len(self._added_indexers)}个索引器")
+            print(f"【{self.plugin_name}】本次新增{len(new_added)}个索引器，共加入{len(self._added_indexers)}个索引器")
             
         except Exception as e:
             print(f"【{self.plugin_name}】添加Jackett索引器异常: {str(e)}")
@@ -132,13 +149,16 @@ class Jackett(_PluginBase):
             from app.helper.sites import SitesHelper
             sites_helper = SitesHelper()
             
+            removed_count = 0
             for domain in self._added_indexers:
                 try:
                     sites_helper.remove_indexer(domain)
+                    removed_count += 1
                     print(f"【{self.plugin_name}】移除索引器: {domain}")
-                except:
-                    pass
+                except Exception as e:
+                    print(f"【{self.plugin_name}】移除索引器{domain}失败: {str(e)}")
             
+            print(f"【{self.plugin_name}】共移除{removed_count}个索引器")
             self._added_indexers = []
         except Exception as e:
             print(f"【{self.plugin_name}】移除Jackett索引器异常: {str(e)}")
@@ -147,6 +167,14 @@ class Jackett(_PluginBase):
         """
         获取Jackett索引器列表
         """
+        if not self._host or not self._api_key:
+            print(f"【{self.plugin_name}】缺少必要配置参数，无法获取索引器")
+            return []
+        
+        # 规范化host地址
+        if self._host.endswith('/'):
+            self._host = self._host[:-1]
+            
         try:
             # 获取Cookie
             headers = {
@@ -156,38 +184,60 @@ class Jackett(_PluginBase):
                 "Accept": "application/json, text/javascript, */*; q=0.01"
             }
             
-            # 先尝试不使用密码连接
-            indexer_query_url = f"{self._host}/api/v2.0/indexers?configured=true"
-            print(f"【{self.plugin_name}】请求索引器: {indexer_query_url}")
-            
-            # 直接使用RequestUtils，不调用get_session
-            response = RequestUtils(headers=headers).get_res(indexer_query_url)
-            
-            # 如果失败且有密码，尝试先获取cookie
-            if (not response or response.status_code != 200) and self._password:
-                print(f"【{self.plugin_name}】直接请求失败，尝试使用密码登录...")
-                # 这里使用另一种方式获取cookie
-                login_url = f"{self._host}/UI/Dashboard"
-                login_data = {"password": self._password}
-                auth_response = RequestUtils(headers=headers).post_res(url=login_url, data=login_data)
+            if not self._session:
+                self._session = RequestUtils(headers=headers).get_session()
                 
-                if auth_response and auth_response.cookies:
-                    cookies = auth_response.cookies.get_dict()
-                    print(f"【{self.plugin_name}】获取到Cookie: {cookies}")
-                    # 使用获取到的cookies再次请求
-                    response = RequestUtils(headers=headers, cookies=cookies).get_res(indexer_query_url)
+            # 处理登录
+            if self._password:
+                try:
+                    print(f"【{self.plugin_name}】尝试使用密码登录Jackett...")
+                    login_url = f"{self._host}/UI/Dashboard"
+                    login_data = {"password": self._password}
+                    
+                    login_response = RequestUtils(headers=headers, session=self._session).post_res(
+                        url=login_url, 
+                        data=login_data,
+                        params={"password": self._password}
+                    )
+                    
+                    if login_response and login_response.status_code == 200:
+                        self._cookies = self._session.cookies.get_dict()
+                        print(f"【{self.plugin_name}】Jackett登录成功，获取到Cookie")
+                    else:
+                        print(f"【{self.plugin_name}】Jackett登录失败: 状态码 {login_response.status_code if login_response else 'None'}")
+                except Exception as e:
+                    print(f"【{self.plugin_name}】Jackett登录异常: {str(e)}")
+            
+            # 获取索引器列表
+            indexer_query_url = f"{self._host}/api/v2.0/indexers?configured=true"
+            print(f"【{self.plugin_name}】请求索引器列表: {indexer_query_url}")
+            
+            response = None
+            try:
+                response = RequestUtils(headers=headers, session=self._session, cookies=self._cookies).get_res(indexer_query_url)
+            except Exception as e:
+                print(f"【{self.plugin_name}】请求索引器列表异常: {str(e)}")
             
             if not response:
-                print(f"【{self.plugin_name}】无法连接到Jackett服务器")
+                print(f"【{self.plugin_name}】获取索引器列表失败: 无响应")
                 return []
             
             if response.status_code != 200:
-                print(f"【{self.plugin_name}】获取索引器失败: HTTP {response.status_code}")
+                print(f"【{self.plugin_name}】获取索引器列表失败: HTTP {response.status_code}")
                 return []
             
-            indexers = response.json()
-            print(f"【{self.plugin_name}】成功获取到{len(indexers)}个索引器")
-            return indexers
+            try:
+                indexers = response.json()
+                if not indexers or not isinstance(indexers, list):
+                    print(f"【{self.plugin_name}】解析索引器列表失败: 无效的JSON响应")
+                    return []
+                
+                print(f"【{self.plugin_name}】成功获取到{len(indexers)}个索引器")
+                return indexers
+            except Exception as e:
+                print(f"【{self.plugin_name}】解析索引器列表JSON异常: {str(e)}")
+                return []
+                
         except Exception as e:
             print(f"【{self.plugin_name}】获取Jackett索引器异常: {str(e)}")
             return []
@@ -199,19 +249,17 @@ class Jackett(_PluginBase):
         try:
             indexer_id = jackett_indexer.get("id")
             indexer_name = jackett_indexer.get("name")
-            indexer_type = jackett_indexer.get("type")
-            
-            # 使用原始路径作为domain，确保API请求能正确路由
-            full_api_url = f"{self._host}/api/v2.0/indexers/{indexer_id}"
+            indexer_type = jackett_indexer.get("type", "private")
             
             # 基本配置
             mp_indexer = {
                 "id": f"jackett_{indexer_id}",
                 "name": f"[Jackett] {indexer_name}",
-                "domain": full_api_url,
+                "domain": f"{self._host}/api/v2.0/indexers/{indexer_id}",
                 "encoding": "UTF-8",
                 "public": indexer_type == "public",
                 "proxy": False,  # 设为False，因为Jackett已经是代理
+                "parser": "Jackett",  # 指定使用自定义解析器
                 "result_num": 100,
                 "timeout": 30,
                 "level": 2
@@ -232,7 +280,7 @@ class Jackett(_PluginBase):
                 }
             }
             
-            # 种子解析配置 - 更加符合Jackett的XML格式
+            # 种子解析配置 - 适应Jackett的XML格式
             mp_indexer["torrents"] = {
                 "list": {
                     "selector": "item"
@@ -265,19 +313,15 @@ class Jackett(_PluginBase):
                     "grabs": {
                         "selector": "grabs"
                     },
-                    "categories": {
-                        "selector": "category",
-                        "multiple": True
+                    "imdbid": {
+                        "selector": "jackettindexer",
+                        "attribute": "imdbid"
                     },
                     "downloadvolumefactor": {
-                        "case": {
-                            "*": 1
-                        }
+                        "text": "1"
                     },
                     "uploadvolumefactor": {
-                        "case": {
-                            "*": 1
-                        }
+                        "text": "1"
                     }
                 }
             }
@@ -288,7 +332,6 @@ class Jackett(_PluginBase):
             print(f"【{self.plugin_name}】格式化索引器失败: {str(e)}")
             return None
             
-
     def get_form(self) -> Tuple[List[dict], dict]:
         """
         获取配置表单
@@ -297,6 +340,14 @@ class Jackett(_PluginBase):
         
         # 简化表单结构
         return [
+            {
+                'component': 'VAlert',
+                'props': {
+                    'type': 'info',
+                    'text': '配置Jackett服务器信息后，将自动导入Jackett中配置的索引器到MoviePilot搜索系统。请确保Jackett服务可以正常访问，并且已经配置了可用的索引器。',
+                    'class': 'mb-4'
+                }
+            },
             {
                 'component': 'VSwitch',
                 'props': {
@@ -310,7 +361,7 @@ class Jackett(_PluginBase):
                     'model': 'host',
                     'label': 'Jackett地址',
                     'placeholder': 'http://localhost:9117',
-                    'hint': '请输入Jackett的完整地址，包括http或https前缀'
+                    'hint': '请输入Jackett的完整地址，包括http或https前缀，不要以斜杠结尾'
                 }
             },
             {
@@ -339,7 +390,7 @@ class Jackett(_PluginBase):
                     'multiple': True,
                     'chips': True,
                     'items': [],
-                    'hint': '留空则使用全部索引器'
+                    'hint': '留空则使用全部索引器，获取索引器前需保存基本配置'
                 },
                 'events': [
                     {
@@ -436,8 +487,29 @@ class Jackett(_PluginBase):
                 "methods": ["GET"],
                 "summary": "获取Jackett索引器列表",
                 "description": "获取已配置的Jackett索引器列表"
+            },
+            {
+                "path": "/jackett/reload",
+                "endpoint": self.reload_indexers,
+                "methods": ["GET"],
+                "summary": "重新加载Jackett索引器",
+                "description": "重新加载Jackett索引器到MoviePilot"
             }
         ]
+
+    def reload_indexers(self):
+        """
+        重新加载索引器
+        """
+        print(f"【{self.plugin_name}】正在重新加载索引器...")
+        if not self._host or not self._api_key:
+            return {"code": 1, "message": "请先配置Jackett地址和API Key"}
+            
+        try:
+            self._add_jackett_indexers()
+            return {"code": 0, "message": f"重新加载索引器成功，共添加{len(self._added_indexers)}个索引器"}
+        except Exception as e:
+            return {"code": 1, "message": f"重新加载索引器失败: {str(e)}"}
 
     def get_indexers(self):
         """
