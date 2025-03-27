@@ -1,15 +1,16 @@
 {
   "Jackett": {
-    "name": "Jackett搜索器",
-    "description": "支持 Jackett 搜索器，用于资源检索。",
-    "version": "1.03",
+    "name": "Jackett",
+    "description": "支持 Jackett 搜索器，将Jackett索引器添加到内建搜索器中。",
     "icon": "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico",
     "author": "jason",
+    "version": "1.04",
     "level": 2,
     "labels": "搜索",
     "history": {
-      "v1.03": "修复V2版本中的事件类型错误，更正为正确的DomainSearchStart和DomainSearchResults，添加管理密码字段，优化索引器获取方式",
-      "v1.01": "修复配置表单显示问题，优化搜索结果处理"
+      "1.04": "改用SitesHelper接口实现，直接将Jackett索引器添加至内建搜索器，避免使用事件机制",
+      "1.03": "简化插件代码，移除事件注册功能，增加日志信息，修复配置问题",
+      "1.01": "完成基础功能"
     }
   }
 } 
