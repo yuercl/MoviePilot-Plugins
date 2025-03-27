@@ -281,7 +281,7 @@ class Jackett(_PluginBase):
         注册事件响应
         """
         # 搜索种子事件
-        @eventmanager.register(EventType.TorrentSearch)
+        @eventmanager.register(EventType.DomainSearchStart)
         def search_torrent(event: Event):
             """
             搜索种子
@@ -351,7 +351,7 @@ class Jackett(_PluginBase):
                 
                 # 发送搜索结果事件
                 if formatted_results:
-                    eventmanager.send_event(EventType.TorrentSearchResult, {
+                    eventmanager.send_event(EventType.DomainSearchResults, {
                         "search_word": search_word,
                         "results": formatted_results
                     })
