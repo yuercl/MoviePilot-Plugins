@@ -16,7 +16,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.04beta1"
+    plugin_version = "1.05"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -193,7 +193,7 @@ class Jackett(_PluginBase):
             mp_indexer = {
                 "id": f"jackett_{indexer_id}",
                 "name": f"[Jackett] {indexer_name}",
-                "domain": self._host,
+                "domain": f"{self._host}/api/v2.0/indexers/{indexer_id}",
                 "encoding": "UTF-8",
                 "public": jackett_indexer.get("type") == "public",
                 "proxy": True,
@@ -205,7 +205,7 @@ class Jackett(_PluginBase):
             mp_indexer["search"] = {
                 "paths": [
                     {
-                        "path": f"/api/v2.0/indexers/{indexer_id}/results/torznab/api",
+                        "path": "/results/torznab/api",
                         "method": "get"
                     }
                 ],
@@ -216,15 +216,14 @@ class Jackett(_PluginBase):
                 }
             }
             
-            # 种子解析配置
+            # 种子解析配置 - 优化格式以适应MoviePilot V2
             mp_indexer["torrents"] = {
                 "list": {
                     "selector": "item"
                 },
                 "fields": {
                     "id": {
-                        "selector": "guid",
-                        "attribute": "text"
+                        "selector": "guid"
                     },
                     "title": {
                         "selector": "title"
@@ -263,6 +262,7 @@ class Jackett(_PluginBase):
                 }
             }
             
+            print(f"【{self.plugin_name}】已格式化索引器: {indexer_name}")
             return mp_indexer
         except Exception as e:
             print(f"【{self.plugin_name}】格式化索引器失败: {str(e)}")
@@ -274,123 +274,57 @@ class Jackett(_PluginBase):
         获取配置表单
         """
         print(f"【{self.plugin_name}】正在加载配置表单...")
+        
+        # 简化表单结构
         return [
             {
-                'component': 'VForm',
-                'content': [
+                'component': 'VSwitch',
+                'props': {
+                    'model': 'enabled',
+                    'label': '启用插件'
+                }
+            },
+            {
+                'component': 'VTextField',
+                'props': {
+                    'model': 'host',
+                    'label': 'Jackett地址',
+                    'placeholder': 'http://localhost:9117',
+                    'hint': '请输入Jackett的完整地址，包括http或https前缀'
+                }
+            },
+            {
+                'component': 'VTextField',
+                'props': {
+                    'model': 'api_key',
+                    'label': 'API Key',
+                    'type': 'password',
+                    'placeholder': 'Jackett管理界面右上角的API Key'
+                }
+            },
+            {
+                'component': 'VTextField',
+                'props': {
+                    'model': 'password',
+                    'label': '管理密码',
+                    'type': 'password',
+                    'placeholder': 'Jackett管理界面配置的Admin password，如未配置可为空'
+                }
+            },
+            {
+                'component': 'VSelect',
+                'props': {
+                    'model': 'indexers',
+                    'label': '索引器',
+                    'multiple': True,
+                    'chips': True,
+                    'items': [],
+                    'hint': '留空则使用全部索引器'
+                },
+                'events': [
                     {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSwitch',
-                                        'props': {
-                                            'model': 'enabled',
-                                            'label': '启用插件'
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 6
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VTextField',
-                                        'props': {
-                                            'model': 'host',
-                                            'label': 'Jackett地址',
-                                            'placeholder': 'http://localhost:9117'
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 6
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VTextField',
-                                        'props': {
-                                            'model': 'api_key',
-                                            'label': 'API Key',
-                                            'type': 'password',
-                                            'placeholder': 'Jackett管理界面右上角的API Key'
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 6
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VTextField',
-                                        'props': {
-                                            'model': 'password',
-                                            'label': '管理密码',
-                                            'type': 'password',
-                                            'placeholder': 'Jackett管理界面配置的Admin password，如未配置可为空'
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSelect',
-                                        'props': {
-                                            'model': 'indexers',
-                                            'label': '索引器',
-                                            'multiple': True,
-                                            'chips': True,
-                                            'items': [],
-                                            'persistent-hint': True,
-                                            'hint': '留空则使用全部索引器'
-                                        },
-                                        'events': [
-                                            {
-                                                'name': 'mounted',
-                                                'value': 'this.get_indexers'
-                                            }
-                                        ]
-                                    }
-                                ]
-                            }
-                        ]
+                        'name': 'mounted',
+                        'value': 'this.get_indexers'
                     }
                 ]
             }
@@ -409,6 +343,32 @@ class Jackett(_PluginBase):
         print(f"【{self.plugin_name}】正在加载插件页面...")
         return [
             {
+                'component': 'VAlert',
+                'props': {
+                    'type': 'info',
+                    'text': '此插件用于对接Jackett搜索器，将Jackett中配置的索引器添加到MoviePilot的内建搜索中。需要先在Jackett中添加并配置好索引器，启用插件并保存配置后，即可在搜索中使用这些索引器。'
+                }
+            },
+            {
+                'component': 'VBtn',
+                'props': {
+                    'color': 'primary',
+                    'text': '查看索引器列表'
+                },
+                'events': [
+                    {
+                        'name': 'click',
+                        'value': 'this.get_indexers()'
+                    }
+                ]
+            },
+            {
+                'component': 'VDivider',
+                'props': {
+                    'class': 'my-3'
+                }
+            },
+            {
                 'component': 'VRow',
                 'content': [
                     {
@@ -418,11 +378,24 @@ class Jackett(_PluginBase):
                         },
                         'content': [
                             {
-                                'component': 'VAlert',
+                                'component': 'VTable',
                                 'props': {
-                                    'type': 'info',
-                                    'text': '此插件用于对接Jackett搜索器，将Jackett中配置的索引器添加到MoviePilot的内建搜索中。需要先在Jackett中添加并配置好索引器，启用插件并保存配置后，即可在搜索中使用这些索引器。'
-                                }
+                                    'headers': [
+                                        {'title': 'ID', 'key': 'id'},
+                                        {'title': '索引器名称', 'key': 'name'},
+                                        {'title': '类型', 'key': 'type'}
+                                    ],
+                                    'items': [],
+                                    'loading': true,
+                                    'loadingText': '加载中...',
+                                    'class': 'indexer-table'
+                                },
+                                'events': [
+                                    {
+                                        'name': 'mounted',
+                                        'value': 'this.get_indexers().then(res => { if(res.code === 0) { this.items = res.data.map(item => ({ id: item.value, name: item.text, type: "Jackett" })); this.loading = false; } })'
+                                    }
+                                ]
                             }
                         ]
                     }
@@ -483,4 +456,16 @@ class Jackett(_PluginBase):
         停止插件服务
         """
         print(f"【{self.plugin_name}】停止插件服务...")
-        self._remove_jackett_indexers() 
+        self._remove_jackett_indexers()
+
+    def get_service(self) -> List[Dict[str, Any]]:
+        """
+        注册定时服务
+        """
+        return [{
+            "id": "jackett_update_indexers",
+            "name": "更新Jackett索引器",
+            "trigger": "interval",
+            "func": self._add_jackett_indexers,
+            "kwargs": {"hours": 12}
+        }] 
