@@ -19,7 +19,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.16"
+    plugin_version = "1.17"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -247,10 +247,10 @@ class Jackett(_PluginBase):
         将Jackett索引器格式化为MoviePilot索引器格式
         """
         try:
-            indexer_id = jackett_indexer.get("id")
-            indexer_name = jackett_indexer.get("name")
-            indexer_type = jackett_indexer.get("type", "private")
-            indexer_categories = jackett_indexer.get("caps", {}).get("categories", {}).get("items", [])
+            # 从Jackett API返回的数据中提取必要信息
+            indexer_id = jackett_indexer.get("id", "")
+            indexer_name = jackett_indexer.get("name", "")
+            indexer_type = "private"  # Jackett默认为私有索引器
             
             # 基本配置
             mp_indexer = {
@@ -258,23 +258,13 @@ class Jackett(_PluginBase):
                 "name": f"[Jackett] {indexer_name}",
                 "domain": f"{self._host}/api/v2.0/indexers/{indexer_id}",
                 "encoding": "UTF-8",
-                "public": indexer_type == "public",
+                "public": False,  # 默认为私有索引器
                 "proxy": False,  # 设为False，因为Jackett已经是代理
                 "parser": "Torznab",  # 使用Torznab解析器
                 "result_num": 100,
                 "timeout": 30,
                 "level": 2
             }
-            
-            # 处理分类信息
-            categories = []
-            for cat in indexer_categories:
-                cat_id = cat.get("id")
-                if cat_id:
-                    categories.append(str(cat_id))
-            
-            if categories:
-                mp_indexer["categories"] = categories
             
             # 搜索配置
             mp_indexer["search"] = {
@@ -288,7 +278,6 @@ class Jackett(_PluginBase):
                     "apikey": self._api_key,
                     "t": "search",
                     "q": "{keyword}",
-                    "cat": "{categories}",  # 支持分类搜索
                     "extended": "1"  # 启用扩展搜索
                 }
             }
@@ -334,31 +323,11 @@ class Jackett(_PluginBase):
                     },
                     "imdbid": {
                         "selector": "torznab|attr[name=imdbid]"
-                    },
-                    "category": {
-                        "selector": "category",
-                        "default": ""
-                    },
-                    "downloadvolumefactor": {
-                        "selector": "torznab|attr[name=downloadvolumefactor]",
-                        "default": "1"
-                    },
-                    "uploadvolumefactor": {
-                        "selector": "torznab|attr[name=uploadvolumefactor]",
-                        "default": "1"
-                    },
-                    "minimumratio": {
-                        "selector": "torznab|attr[name=minimumratio]",
-                        "default": "1"
-                    },
-                    "minimumseedtime": {
-                        "selector": "torznab|attr[name=minimumseedtime]",
-                        "default": "0"
                     }
                 }
             }
             
-            print(f"【{self.plugin_name}】已格式化索引器: {indexer_name}, 支持{len(categories)}个分类")
+            print(f"【{self.plugin_name}】已格式化索引器: {indexer_name}")
             return mp_indexer
         except Exception as e:
             print(f"【{self.plugin_name}】格式化索引器失败: {str(e)}")
