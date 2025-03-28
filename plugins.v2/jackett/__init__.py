@@ -19,7 +19,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.15"
+    plugin_version = "1.16"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -74,9 +74,6 @@ class Jackett(_PluginBase):
         添加Jackett索引器到MoviePilot内建索引器
         """
         try:
-            # 先清理之前添加的索引器
-            self._remove_jackett_indexers()
-            
             # 导入SitesHelper
             try:
                 from app.helper.sites import SitesHelper
@@ -96,10 +93,6 @@ class Jackett(_PluginBase):
             # 添加索引器到MoviePilot
             sites_helper = SitesHelper()
             
-            # 先获取已有的索引器
-            existing_indexers = sites_helper.get_indexers() or {}
-            print(f"【{self.plugin_name}】现有索引器: {len(existing_indexers)}个")
-            
             # 存储添加的索引器
             new_added = []
             
@@ -113,15 +106,6 @@ class Jackett(_PluginBase):
                     continue
                 
                 domain = f"jackett_{indexer_id}"
-                
-                # 检查是否已存在
-                if domain in existing_indexers:
-                    print(f"【{self.plugin_name}】索引器已存在，将更新: {indexer.get('name')}")
-                    # 移除旧的
-                    try:
-                        sites_helper.remove_indexer(domain)
-                    except Exception as e:
-                        print(f"【{self.plugin_name}】移除旧索引器失败: {str(e)}")
                 
                 # 格式化为MoviePilot支持的格式
                 mp_indexer = self._format_indexer(indexer)
@@ -141,28 +125,6 @@ class Jackett(_PluginBase):
             
         except Exception as e:
             print(f"【{self.plugin_name}】添加Jackett索引器异常: {str(e)}")
-    
-    def _remove_jackett_indexers(self):
-        """
-        移除之前添加的Jackett索引器
-        """
-        try:
-            from app.helper.sites import SitesHelper
-            sites_helper = SitesHelper()
-            
-            removed_count = 0
-            for domain in self._added_indexers:
-                try:
-                    sites_helper.remove_indexer(domain)
-                    removed_count += 1
-                    print(f"【{self.plugin_name}】移除索引器: {domain}")
-                except Exception as e:
-                    print(f"【{self.plugin_name}】移除索引器{domain}失败: {str(e)}")
-            
-            print(f"【{self.plugin_name}】共移除{removed_count}个索引器")
-            self._added_indexers = []
-        except Exception as e:
-            print(f"【{self.plugin_name}】移除Jackett索引器异常: {str(e)}")
     
     def _fetch_jackett_indexers(self):
         """
@@ -288,7 +250,7 @@ class Jackett(_PluginBase):
             indexer_id = jackett_indexer.get("id")
             indexer_name = jackett_indexer.get("name")
             indexer_type = jackett_indexer.get("type", "private")
-            indexer_categories = jackett_indexer.get("categories", [])
+            indexer_categories = jackett_indexer.get("caps", {}).get("categories", {}).get("items", [])
             
             # 基本配置
             mp_indexer = {
@@ -301,9 +263,18 @@ class Jackett(_PluginBase):
                 "parser": "Torznab",  # 使用Torznab解析器
                 "result_num": 100,
                 "timeout": 30,
-                "level": 2,
-                "categories": [str(cat.get("id")) for cat in indexer_categories if cat.get("id")]
+                "level": 2
             }
+            
+            # 处理分类信息
+            categories = []
+            for cat in indexer_categories:
+                cat_id = cat.get("id")
+                if cat_id:
+                    categories.append(str(cat_id))
+            
+            if categories:
+                mp_indexer["categories"] = categories
             
             # 搜索配置
             mp_indexer["search"] = {
@@ -387,7 +358,7 @@ class Jackett(_PluginBase):
                 }
             }
             
-            print(f"【{self.plugin_name}】已格式化索引器: {indexer_name}, 支持{len(indexer_categories)}个分类")
+            print(f"【{self.plugin_name}】已格式化索引器: {indexer_name}, 支持{len(categories)}个分类")
             return mp_indexer
         except Exception as e:
             print(f"【{self.plugin_name}】格式化索引器失败: {str(e)}")
