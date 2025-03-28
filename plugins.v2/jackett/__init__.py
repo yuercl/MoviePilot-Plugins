@@ -19,7 +19,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.18"
+    plugin_version = "1.19"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -250,7 +250,6 @@ class Jackett(_PluginBase):
             # 从Jackett API返回的数据中提取必要信息
             indexer_id = jackett_indexer.get("id", "")
             indexer_name = jackett_indexer.get("name", "")
-            indexer_type = "private"  # Jackett默认为私有索引器
             
             # 基本配置
             mp_indexer = {
@@ -258,71 +257,92 @@ class Jackett(_PluginBase):
                 "name": f"[Jackett] {indexer_name}",
                 "domain": f"{self._host}/api/v2.0/indexers/{indexer_id}",
                 "encoding": "UTF-8",
-                "public": False,  # 默认为私有索引器
+                "public": True,  # Jackett索引器默认为公开
                 "proxy": False,  # 设为False，因为Jackett已经是代理
                 "parser": "Torznab",  # 使用Torznab解析器
-                "result_num": 100,
-                "timeout": 30,
-                "level": 2
-            }
-            
-            # 搜索配置
-            mp_indexer["search"] = {
-                "paths": [
-                    {
-                        "path": "/results/torznab/api",
-                        "method": "get"
-                    }
-                ],
-                "params": {
-                    "apikey": self._api_key,
-                    "t": "search",
-                    "q": "{keyword}",
-                    "extended": "1"  # 启用扩展搜索
-                }
-            }
-            
-            # 种子解析配置 - 使用标准Torznab格式
-            mp_indexer["torrents"] = {
-                "list": {
-                    "selector": "item"
+                "language": "zh_CN",
+                "category": {
+                    "movie": [
+                        {
+                            "id": "2000",
+                            "cat": "Movies",
+                            "desc": "Movies"
+                        }
+                    ],
+                    "tv": [
+                        {
+                            "id": "5000",
+                            "cat": "TV",
+                            "desc": "TV"
+                        }
+                    ]
                 },
-                "fields": {
-                    "id": {
-                        "selector": "guid"
+                "search": {
+                    "paths": [
+                        {
+                            "path": "/results/torznab/api",
+                            "method": "get"
+                        }
+                    ],
+                    "params": {
+                        "apikey": self._api_key,
+                        "t": "search",
+                        "q": "{keyword}",
+                        "cat": "{categories}",
+                        "extended": "1"
+                    }
+                },
+                "torrents": {
+                    "list": {
+                        "selector": "item"
                     },
-                    "title": {
-                        "selector": "title"
-                    },
-                    "description": {
-                        "selector": "description"
-                    },
-                    "details": {
-                        "selector": "comments"
-                    },
-                    "download": {
-                        "selector": "link"
-                    },
-                    "size": {
-                        "selector": "size"
-                    },
-                    "date_added": {
-                        "selector": "pubDate"
-                    },
-                    "seeders": {
-                        "selector": "torznab|attr[name=seeders]",
-                        "default": "0"
-                    },
-                    "leechers": {
-                        "selector": "torznab|attr[name=peers]",
-                        "default": "0"
-                    },
-                    "grabs": {
-                        "selector": "torznab|attr[name=grabs]",
-                        "default": "0"
-                    },
-                    "imdbid": {
-                        "selector": "torznab|attr[name=imdbid]"
+                    "fields": {
+                        "id": {
+                            "selector": "guid"
+                        },
+                        "title": {
+                            "selector": "title"
+                        },
+                        "description": {
+                            "selector": "description"
+                        },
+                        "details": {
+                            "selector": "comments"
+                        },
+                        "download": {
+                            "selector": "link"
+                        },
+                        "size": {
+                            "selector": "size"
+                        },
+                        "date_added": {
+                            "selector": "pubDate"
+                        },
+                        "seeders": {
+                            "selector": "torznab|attr[name=seeders]",
+                            "default": "0"
+                        },
+                        "leechers": {
+                            "selector": "torznab|attr[name=peers]",
+                            "default": "0"
+                        },
+                        "grabs": {
+                            "selector": "torznab|attr[name=grabs]",
+                            "default": "0"
+                        },
+                        "imdbid": {
+                            "selector": "torznab|attr[name=imdbid]"
+                        },
+                        "downloadvolumefactor": {
+                            "case": {
+                                "*": 0
+                            }
+                        },
+                        "uploadvolumefactor": {
+                            "case": {
+                                "*": 1
+                            }
+                        }
                     }
                 }
             }
