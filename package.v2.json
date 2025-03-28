@@ -4,7 +4,7 @@
     "description": "支持 Jackett 搜索器，将Jackett索引器添加到内建搜索器中。",
     "icon": "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico",
     "author": "jason",
-    "version": "1.13",
+    "version": "1.14",
     "level": 2,
     "labels": "搜索",
     "history": {

@@ -18,7 +18,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.13"
+    plugin_version = "1.14"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -183,10 +183,10 @@ class Jackett(_PluginBase):
         try:
             # 设置请求头
             headers = {
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "Content-Type": "application/json",
                 "User-Agent": "MoviePilot/1.0",
                 "X-Api-Key": self._api_key,
-                "Accept": "application/json, text/javascript, */*; q=0.01"
+                "Accept": "application/json"
             }
             
             print(f"【{self.plugin_name}】请求头: {headers}")
@@ -221,7 +221,7 @@ class Jackett(_PluginBase):
             while current_try <= max_retries:
                 try:
                     # 使用正确的API路径
-                    indexer_query_url = f"{self._host}/api/v2.0/indexers?configured=true"
+                    indexer_query_url = f"{self._host}/api/v2.0/indexers/all"
                     print(f"【{self.plugin_name}】请求索引器列表 (第{current_try}次尝试): {indexer_query_url}")
                     
                     # 请求API
@@ -237,9 +237,10 @@ class Jackett(_PluginBase):
                         
                         if response.status_code == 200:
                             try:
-                                # 检查响应是否为有效的JSON
-                                if not RequestUtils.check_response_is_valid_json(response):
-                                    print(f"【{self.plugin_name}】响应不是有效的JSON格式")
+                                # 检查响应类型
+                                content_type = response.headers.get('content-type', '').lower()
+                                if 'application/json' not in content_type:
+                                    print(f"【{self.plugin_name}】响应不是JSON格式: {content_type}")
                                     print(f"【{self.plugin_name}】响应内容: {response.text[:500]}...")
                                     if current_try < max_retries:
                                         print(f"【{self.plugin_name}】{retry_interval}秒后进行第{current_try + 1}次重试...")
@@ -248,10 +249,24 @@ class Jackett(_PluginBase):
                                         continue
                                     break
                                 
-                                indexers = response.json()
+                                # 尝试解析JSON
+                                try:
+                                    indexers = response.json()
+                                except Exception as e:
+                                    print(f"【{self.plugin_name}】JSON解析失败: {str(e)}")
+                                    print(f"【{self.plugin_name}】响应内容: {response.text[:500]}...")
+                                    if current_try < max_retries:
+                                        print(f"【{self.plugin_name}】{retry_interval}秒后进行第{current_try + 1}次重试...")
+                                        time.sleep(retry_interval)
+                                        current_try += 1
+                                        continue
+                                    break
+                                
                                 if indexers and isinstance(indexers, list):
-                                    print(f"【{self.plugin_name}】成功获取到{len(indexers)}个索引器")
-                                    return indexers
+                                    # 过滤已配置的索引器
+                                    configured_indexers = [idx for idx in indexers if idx.get("configured", False)]
+                                    print(f"【{self.plugin_name}】成功获取到{len(configured_indexers)}个已配置的索引器")
+                                    return configured_indexers
                                 else:
                                     print(f"【{self.plugin_name}】解析索引器列表失败: 无效的JSON响应")
                             except Exception as e:
