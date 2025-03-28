@@ -165,7 +165,7 @@ class Jackett(_PluginBase):
     
     def _fetch_jackett_indexers(self):
         """
-        获取Jackett索引器列表
+        获取Jackett索引器列表，支持重试机制
         """
         if not self._host or not self._api_key:
             print(f"【{self.plugin_name}】缺少必要配置参数，无法获取索引器")
@@ -174,6 +174,11 @@ class Jackett(_PluginBase):
         # 规范化host地址
         if self._host.endswith('/'):
             self._host = self._host[:-1]
+            
+        # 设置重试参数
+        max_retries = 3
+        retry_interval = 5
+        current_try = 1
             
         try:
             # 设置请求头
@@ -184,65 +189,115 @@ class Jackett(_PluginBase):
                 "Accept": "application/json, text/javascript, */*; q=0.01"
             }
             
-            # 创建会话 - 使用正确的RequestUtils方式
+            # 创建会话
             if not self._session:
                 print(f"【{self.plugin_name}】初始化会话...")
-                self._session = {}  # 使用字典保存cookie
+                self._session = {}
             
-            # 处理登录
+            # 处理登录 - 添加重试机制
             if self._password:
+                while current_try <= max_retries:
+                    try:
+                        print(f"【{self.plugin_name}】尝试使用密码登录Jackett (第{current_try}次尝试)...")
+                        login_url = f"{self._host}/UI/Dashboard"
+                        login_data = {"password": self._password}
+                        
+                        login_response = RequestUtils(
+                            headers=headers,
+                            timeout=30
+                        ).post_res(
+                            url=login_url, 
+                            data=login_data,
+                            params={"password": self._password}
+                        )
+                        
+                        if login_response and login_response.status_code == 200:
+                            self._cookies = login_response.cookies.get_dict()
+                            print(f"【{self.plugin_name}】Jackett登录成功，获取到Cookie: {self._cookies}")
+                            break
+                        else:
+                            error_msg = f"状态码 {login_response.status_code if login_response else 'None'}"
+                            print(f"【{self.plugin_name}】Jackett登录失败: {error_msg}")
+                            
+                            if current_try < max_retries:
+                                print(f"【{self.plugin_name}】{retry_interval}秒后进行第{current_try + 1}次重试...")
+                                time.sleep(retry_interval)
+                            current_try += 1
+                    except Exception as e:
+                        print(f"【{self.plugin_name}】Jackett登录异常: {str(e)}")
+                        if current_try < max_retries:
+                            print(f"【{self.plugin_name}】{retry_interval}秒后进行第{current_try + 1}次重试...")
+                            time.sleep(retry_interval)
+                        current_try += 1
+            
+            # 重置重试计数
+            current_try = 1
+            
+            # 获取索引器列表 - 添加重试机制
+            while current_try <= max_retries:
                 try:
-                    print(f"【{self.plugin_name}】尝试使用密码登录Jackett...")
-                    login_url = f"{self._host}/UI/Dashboard"
-                    login_data = {"password": self._password}
+                    indexer_query_url = f"{self._host}/api/v2.0/indexers?configured=true"
+                    print(f"【{self.plugin_name}】请求索引器列表 (第{current_try}次尝试): {indexer_query_url}")
                     
-                    login_response = RequestUtils(headers=headers).post_res(
-                        url=login_url, 
-                        data=login_data,
-                        params={"password": self._password}
-                    )
+                    response = RequestUtils(
+                        headers=headers,
+                        cookies=self._cookies,
+                        timeout=30
+                    ).get_res(indexer_query_url)
                     
-                    if login_response and login_response.status_code == 200:
-                        self._cookies = login_response.cookies.get_dict()
-                        print(f"【{self.plugin_name}】Jackett登录成功，获取到Cookie: {self._cookies}")
+                    if response:
+                        print(f"【{self.plugin_name}】收到响应: HTTP {response.status_code}")
+                        
+                        if response.status_code == 200:
+                            try:
+                                indexers = response.json()
+                                if indexers and isinstance(indexers, list):
+                                    print(f"【{self.plugin_name}】成功获取到{len(indexers)}个索引器")
+                                    
+                                    # 验证索引器数据的完整性
+                                    valid_indexers = []
+                                    for indexer in indexers:
+                                        if not indexer.get("id") or not indexer.get("name"):
+                                            print(f"【{self.plugin_name}】跳过无效的索引器数据: {indexer}")
+                                            continue
+                                        valid_indexers.append(indexer)
+                                    
+                                    if valid_indexers:
+                                        print(f"【{self.plugin_name}】验证后保留{len(valid_indexers)}个有效索引器")
+                                        return valid_indexers
+                                    else:
+                                        print(f"【{self.plugin_name}】未找到有效的索引器数据")
+                                else:
+                                    print(f"【{self.plugin_name}】解析索引器列表失败: 无效的JSON响应")
+                            except Exception as e:
+                                print(f"【{self.plugin_name}】解析索引器列表JSON异常: {str(e)}")
+                                if response and hasattr(response, 'text'):
+                                    print(f"【{self.plugin_name}】响应内容: {response.text[:200]}...")
+                        elif response.status_code == 401:
+                            print(f"【{self.plugin_name}】认证失败，请检查API Key是否正确")
+                            break
+                        elif response.status_code == 403:
+                            print(f"【{self.plugin_name}】访问被拒绝，请检查Jackett配置")
+                            break
+                        else:
+                            print(f"【{self.plugin_name}】获取索引器列表失败: HTTP {response.status_code}")
                     else:
-                        print(f"【{self.plugin_name}】Jackett登录失败: 状态码 {login_response.status_code if login_response else 'None'}")
+                        print(f"【{self.plugin_name}】获取索引器列表失败: 无响应")
+                    
+                    if current_try < max_retries:
+                        print(f"【{self.plugin_name}】{retry_interval}秒后进行第{current_try + 1}次重试...")
+                        time.sleep(retry_interval)
+                    current_try += 1
+                    
                 except Exception as e:
-                    print(f"【{self.plugin_name}】Jackett登录异常: {str(e)}")
+                    print(f"【{self.plugin_name}】请求索引器列表异常: {str(e)}")
+                    if current_try < max_retries:
+                        print(f"【{self.plugin_name}】{retry_interval}秒后进行第{current_try + 1}次重试...")
+                        time.sleep(retry_interval)
+                    current_try += 1
             
-            # 获取索引器列表
-            indexer_query_url = f"{self._host}/api/v2.0/indexers?configured=true"
-            print(f"【{self.plugin_name}】请求索引器列表: {indexer_query_url}")
-            
-            response = None
-            try:
-                # 使用正确的RequestUtils调用
-                response = RequestUtils(headers=headers, cookies=self._cookies).get_res(indexer_query_url)
-                print(f"【{self.plugin_name}】收到响应: {response.status_code if response else 'None'}")
-            except Exception as e:
-                print(f"【{self.plugin_name}】请求索引器列表异常: {str(e)}")
-            
-            if not response:
-                print(f"【{self.plugin_name}】获取索引器列表失败: 无响应")
-                return []
-            
-            if response.status_code != 200:
-                print(f"【{self.plugin_name}】获取索引器列表失败: HTTP {response.status_code}")
-                return []
-            
-            try:
-                indexers = response.json()
-                if not indexers or not isinstance(indexers, list):
-                    print(f"【{self.plugin_name}】解析索引器列表失败: 无效的JSON响应")
-                    return []
-                
-                print(f"【{self.plugin_name}】成功获取到{len(indexers)}个索引器")
-                return indexers
-            except Exception as e:
-                print(f"【{self.plugin_name}】解析索引器列表JSON异常: {str(e)}")
-                if response and hasattr(response, 'text'):
-                    print(f"【{self.plugin_name}】响应内容: {response.text[:200]}...")
-                return []
+            print(f"【{self.plugin_name}】在{max_retries}次尝试后仍未能获取索引器列表")
+            return []
                 
         except Exception as e:
             print(f"【{self.plugin_name}】获取Jackett索引器异常: {str(e)}")
@@ -256,6 +311,7 @@ class Jackett(_PluginBase):
             indexer_id = jackett_indexer.get("id")
             indexer_name = jackett_indexer.get("name")
             indexer_type = jackett_indexer.get("type", "private")
+            indexer_categories = jackett_indexer.get("categories", [])
             
             # 基本配置
             mp_indexer = {
@@ -265,10 +321,11 @@ class Jackett(_PluginBase):
                 "encoding": "UTF-8",
                 "public": indexer_type == "public",
                 "proxy": False,  # 设为False，因为Jackett已经是代理
-                "parser": "Torznab",  # 使用Torznab解析器而不是Jackett
+                "parser": "Torznab",  # 使用Torznab解析器
                 "result_num": 100,
                 "timeout": 30,
-                "level": 2
+                "level": 2,
+                "categories": [str(cat.get("id")) for cat in indexer_categories if cat.get("id")]
             }
             
             # 搜索配置
@@ -282,7 +339,8 @@ class Jackett(_PluginBase):
                 "params": {
                     "apikey": self._api_key,
                     "t": "search",
-                    "q": "{keyword}"
+                    "q": "{keyword}",
+                    "cat": "{categories}"  # 支持分类搜索
                 }
             }
             
@@ -298,6 +356,9 @@ class Jackett(_PluginBase):
                     "title": {
                         "selector": "title"
                     },
+                    "description": {
+                        "selector": "description"
+                    },
                     "details": {
                         "selector": "comments"
                     },
@@ -311,16 +372,23 @@ class Jackett(_PluginBase):
                         "selector": "pubDate"
                     },
                     "seeders": {
-                        "selector": "torznab|attr[name=seeders]"
+                        "selector": "torznab|attr[name=seeders]",
+                        "default": "0"
                     },
                     "leechers": {
-                        "selector": "torznab|attr[name=peers]"
+                        "selector": "torznab|attr[name=peers]",
+                        "default": "0"
                     },
                     "grabs": {
-                        "selector": "torznab|attr[name=grabs]"
+                        "selector": "torznab|attr[name=grabs]",
+                        "default": "0"
                     },
                     "imdbid": {
                         "selector": "torznab|attr[name=imdbid]"
+                    },
+                    "category": {
+                        "selector": "category",
+                        "default": ""
                     },
                     "downloadvolumefactor": {
                         "selector": "torznab|attr[name=downloadvolumefactor]",
@@ -329,11 +397,19 @@ class Jackett(_PluginBase):
                     "uploadvolumefactor": {
                         "selector": "torznab|attr[name=uploadvolumefactor]",
                         "default": "1"
+                    },
+                    "minimumratio": {
+                        "selector": "torznab|attr[name=minimumratio]",
+                        "default": "1"
+                    },
+                    "minimumseedtime": {
+                        "selector": "torznab|attr[name=minimumseedtime]",
+                        "default": "0"
                     }
                 }
             }
             
-            print(f"【{self.plugin_name}】已格式化索引器: {indexer_name}")
+            print(f"【{self.plugin_name}】已格式化索引器: {indexer_name}, 支持{len(indexer_categories)}个分类")
             return mp_indexer
         except Exception as e:
             print(f"【{self.plugin_name}】格式化索引器失败: {str(e)}")

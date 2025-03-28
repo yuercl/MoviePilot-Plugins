@@ -4,10 +4,11 @@
     "description": "支持 Jackett 搜索器，将Jackett索引器添加到内建搜索器中。",
     "icon": "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico",
     "author": "jason",
-    "version": "1.08",
+    "version": "1.09",
     "level": 2,
     "labels": "搜索",
     "history": {
+      "1.09": "优化索引器解析和错误处理：支持分类搜索，添加更多种子属性，增加请求重试机制，完善错误日志",
       "1.08": "修复RequestUtils会话创建方法，使用Torznab解析器处理XML格式，完善索引器添加流程",
       "1.07": "重构索引器获取逻辑，优化登录验证，解析器支持，修复搜索调用问题，确保索引器可用",
       "1.06": "修复页面渲染错误，优化索引器注册逻辑，避免重复添加，美化插件界面",
