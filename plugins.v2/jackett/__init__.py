@@ -19,7 +19,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.17"
+    plugin_version = "1.18"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -560,12 +560,52 @@ class Jackett(_PluginBase):
         print(f"【{self.plugin_name}】get_state返回: {state}, enabled={self._enabled}, host={bool(self._host)}, api_key={bool(self._api_key)}")
         return state
 
+    def _remove_jackett_indexers(self):
+        """
+        从 MoviePilot 中移除 Jackett 索引器
+        """
+        try:
+            # 导入 SitesHelper
+            try:
+                from app.helper.sites import SitesHelper
+                print(f"【{self.plugin_name}】成功导入SitesHelper，准备移除索引器")
+            except Exception as e:
+                print(f"【{self.plugin_name}】导入SitesHelper失败: {str(e)}")
+                return
+
+            # 移除已添加的索引器
+            sites_helper = SitesHelper()
+            removed_count = 0
+            
+            for domain in self._added_indexers:
+                try:
+                    sites_helper.remove_indexer(domain=domain)
+                    removed_count += 1
+                    print(f"【{self.plugin_name}】成功移除索引器: {domain}")
+                except Exception as e:
+                    print(f"【{self.plugin_name}】移除索引器失败: {domain} - {str(e)}")
+                    
+            # 清空已添加索引器列表
+            self._added_indexers = []
+            print(f"【{self.plugin_name}】共移除了 {removed_count} 个索引器")
+            
+        except Exception as e:
+            print(f"【{self.plugin_name}】移除Jackett索引器异常: {str(e)}")
+
     def stop_service(self) -> None:
         """
         停止插件服务
         """
-        print(f"【{self.plugin_name}】停止插件服务...")
-        self._remove_jackett_indexers()
+        try:
+            print(f"【{self.plugin_name}】正在停止插件服务...")
+            # 移除所有添加的索引器
+            self._remove_jackett_indexers()
+            # 清理会话
+            self._session = None
+            self._cookies = None
+            print(f"【{self.plugin_name}】插件服务已停止")
+        except Exception as e:
+            print(f"【{self.plugin_name}】停止插件服务出错: {str(e)}")
 
     def get_service(self) -> List[Dict[str, Any]]:
         """
