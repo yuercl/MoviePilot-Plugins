@@ -19,7 +19,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.22"
+    plugin_version = "1.30"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -74,13 +74,25 @@ class Jackett(_PluginBase):
         添加Jackett索引器到MoviePilot内建索引器
         """
         try:
-            # 导入SitesHelper
+            # 导入SitesHelper - 尝试多种导入路径
+            sites_helper = None
             try:
+                # 尝试 V2 版本的导入路径
                 from app.helper.sites import SitesHelper
-                from app.utils.types import SearchType
-                print(f"【{self.plugin_name}】成功导入SitesHelper")
-            except Exception as e:
-                print(f"【{self.plugin_name}】导入SitesHelper失败: {str(e)}")
+                sites_helper = SitesHelper()
+                print(f"【{self.plugin_name}】成功导入SitesHelper (V2路径)")
+            except ImportError:
+                try:
+                    # 尝试 V1 版本的导入路径
+                    from app.sites import SitesHelper
+                    sites_helper = SitesHelper()
+                    print(f"【{self.plugin_name}】成功导入SitesHelper (V1路径)")
+                except ImportError as e:
+                    print(f"【{self.plugin_name}】导入SitesHelper失败: {str(e)}")
+                    return
+            
+            if not sites_helper:
+                print(f"【{self.plugin_name}】无法创建SitesHelper实例")
                 return
             
             # 获取Jackett索引器列表
@@ -90,9 +102,6 @@ class Jackett(_PluginBase):
                 return
             
             print(f"【{self.plugin_name}】获取到{len(indexers)}个Jackett索引器")
-            
-            # 添加索引器到MoviePilot
-            sites_helper = SitesHelper()
             
             # 先移除已添加的索引器，避免重复
             try:
@@ -106,6 +115,17 @@ class Jackett(_PluginBase):
             # 存储添加的索引器
             new_added = []
             
+            # 尝试预先初始化索引器
+            try:
+                if hasattr(sites_helper, "init_builtin"):
+                    print(f"【{self.plugin_name}】尝试初始化内置索引器...")
+                    sites_helper.init_builtin()
+                if hasattr(sites_helper, "init_indexer"):
+                    print(f"【{self.plugin_name}】尝试初始化索引器...")
+                    sites_helper.init_indexer()
+            except Exception as e:
+                print(f"【{self.plugin_name}】初始化索引器异常: {str(e)}")
+            
             for indexer in indexers:
                 indexer_id = indexer.get("id")
                 if not indexer_id:
@@ -115,7 +135,7 @@ class Jackett(_PluginBase):
                     print(f"【{self.plugin_name}】跳过未选择的索引器: {indexer.get('name')}")
                     continue
                 
-                domain = f"jackett_{indexer_id}"
+                domain = f"jackett_{indexer_id.lower()}"  # 确保使用小写的ID
                 
                 # 格式化为MoviePilot支持的格式
                 mp_indexer = self._format_indexer(indexer)
@@ -124,6 +144,18 @@ class Jackett(_PluginBase):
                     
                 # 添加到MoviePilot
                 try:
+                    # 先检查索引器是否已存在
+                    existing_sites = []
+                    if hasattr(sites_helper, "get_indexers"):
+                        existing_sites = sites_helper.get_indexers() or []
+                    elif hasattr(sites_helper, "get_all_indexers"):
+                        existing_sites = sites_helper.get_all_indexers() or []
+                    
+                    if domain in existing_sites:
+                        print(f"【{self.plugin_name}】索引器已存在，先移除: {domain}")
+                        sites_helper.remove_indexer(domain=domain)
+                    
+                    # 添加索引器
                     sites_helper.add_indexer(domain=domain, indexer=mp_indexer)
                     self._added_indexers.append(domain)
                     new_added.append(domain)
@@ -295,7 +327,7 @@ class Jackett(_PluginBase):
             indexer_id = jackett_indexer.get("id", "")
             indexer_name = jackett_indexer.get("name", "")
             
-            # 基本配置
+            # 基本配置 - 使用更简单的结构
             mp_indexer = {
                 "id": f"jackett_{indexer_id.lower()}",
                 "name": f"[Jackett] {indexer_name}",
@@ -303,8 +335,7 @@ class Jackett(_PluginBase):
                 "encoding": "UTF-8",
                 "public": True,
                 "proxy": False,
-                "language": "zh_CN",
-                "result_type": "json",
+                "site": "http://127.0.0.1/", # 添加一个虚拟站点地址
                 "category": {
                     "movie": [
                         {
@@ -331,9 +362,8 @@ class Jackett(_PluginBase):
                     "params": {
                         "t": "search",
                         "q": "{keyword}",
-                        "cat": "{categories}",
-                        "apikey": self._api_key,
-                        "extended": "1"
+                        "cat": "2000,5000",
+                        "apikey": self._api_key
                     }
                 },
                 "torrents": {
@@ -346,14 +376,6 @@ class Jackett(_PluginBase):
                         },
                         "title": {
                             "selector": "title"
-                        },
-                        "description": {
-                            "selector": "description",
-                            "optional": True
-                        },
-                        "details": {
-                            "selector": "comments",
-                            "optional": True
                         },
                         "download": {
                             "selector": "link"
@@ -371,14 +393,6 @@ class Jackett(_PluginBase):
                         "leechers": {
                             "selector": "torznab|attr[name=peers]",
                             "default": "0"
-                        },
-                        "grabs": {
-                            "selector": "torznab|attr[name=grabs]",
-                            "default": "0"
-                        },
-                        "imdbid": {
-                            "selector": "torznab|attr[name=imdbid]",
-                            "optional": True
                         },
                         "downloadvolumefactor": {
                             "case": {
@@ -755,8 +769,24 @@ class Jackett(_PluginBase):
             
             # 检查是否成功添加
             try:
-                from app.helper.sites import SitesHelper
-                sites_helper = SitesHelper()
+                # 导入 SitesHelper
+                sites_helper = None
+                try:
+                    # 尝试 V2 版本的导入路径
+                    from app.helper.sites import SitesHelper
+                    sites_helper = SitesHelper()
+                except ImportError:
+                    try:
+                        # 尝试 V1 版本的导入路径
+                        from app.sites import SitesHelper
+                        sites_helper = SitesHelper()
+                    except ImportError as e:
+                        print(f"【{self.plugin_name}】导入SitesHelper失败: {str(e)}")
+                        return {"code": 0, "message": f"重新加载索引器成功，但无法验证状态"}
+                
+                if not sites_helper:
+                    print(f"【{self.plugin_name}】无法创建SitesHelper实例")
+                    return {"code": 0, "message": f"重新加载索引器成功，但无法验证状态"}
                 
                 # 获取系统中的索引器
                 all_sites = []
@@ -806,8 +836,24 @@ class Jackett(_PluginBase):
             
             # 检查系统中已添加的索引器
             try:
-                from app.helper.sites import SitesHelper
-                sites_helper = SitesHelper()
+                # 导入 SitesHelper
+                sites_helper = None
+                try:
+                    # 尝试 V2 版本的导入路径
+                    from app.helper.sites import SitesHelper
+                    sites_helper = SitesHelper()
+                except ImportError:
+                    try:
+                        # 尝试 V1 版本的导入路径
+                        from app.sites import SitesHelper
+                        sites_helper = SitesHelper()
+                    except ImportError as e:
+                        print(f"【{self.plugin_name}】导入SitesHelper失败: {str(e)}")
+                        return {"code": 0, "data": formatted_indexers}
+                
+                if not sites_helper:
+                    print(f"【{self.plugin_name}】无法创建SitesHelper实例")
+                    return {"code": 0, "data": formatted_indexers}
                 
                 # 获取系统中的索引器
                 all_sites = []
@@ -853,15 +899,27 @@ class Jackett(_PluginBase):
         """
         try:
             # 导入 SitesHelper
+            sites_helper = None
             try:
+                # 尝试 V2 版本的导入路径
                 from app.helper.sites import SitesHelper
-                print(f"【{self.plugin_name}】成功导入SitesHelper，准备移除索引器")
-            except Exception as e:
-                print(f"【{self.plugin_name}】导入SitesHelper失败: {str(e)}")
+                sites_helper = SitesHelper()
+                print(f"【{self.plugin_name}】成功导入SitesHelper (V2路径)，准备移除索引器")
+            except ImportError:
+                try:
+                    # 尝试 V1 版本的导入路径
+                    from app.sites import SitesHelper
+                    sites_helper = SitesHelper()
+                    print(f"【{self.plugin_name}】成功导入SitesHelper (V1路径)，准备移除索引器")
+                except ImportError as e:
+                    print(f"【{self.plugin_name}】导入SitesHelper失败: {str(e)}")
+                    return
+            
+            if not sites_helper:
+                print(f"【{self.plugin_name}】无法创建SitesHelper实例")
                 return
 
             # 移除已添加的索引器
-            sites_helper = SitesHelper()
             removed_count = 0
             
             for domain in self._added_indexers:
