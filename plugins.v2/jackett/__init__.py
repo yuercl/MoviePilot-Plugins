@@ -19,7 +19,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.20"
+    plugin_version = "1.21"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -256,11 +256,12 @@ class Jackett(_PluginBase):
                 "id": f"jackett_{indexer_id}",
                 "name": f"[Jackett] {indexer_name}",
                 "domain": self._host,
-                "url": f"{self._host}/api/v2.0/indexers/{indexer_id}",
                 "encoding": "UTF-8",
                 "public": True,
                 "proxy": False,
-                "language": "zh_CN",
+                "params": {
+                    "apikey": self._api_key
+                },
                 "category": {
                     "movie": [
                         {
@@ -285,17 +286,16 @@ class Jackett(_PluginBase):
                         }
                     ],
                     "params": {
-                        "apikey": self._api_key,
                         "t": "search",
                         "q": "{keyword}",
                         "cat": "{categories}",
+                        "apikey": self._api_key,
                         "extended": "1"
                     }
                 },
-                "parser": {
-                    "type": "xml",
+                "torrents": {
                     "list": {
-                        "selector": "rss.channel.item"
+                        "selector": "item"
                     },
                     "fields": {
                         "id": {
@@ -303,9 +303,6 @@ class Jackett(_PluginBase):
                         },
                         "title": {
                             "selector": "title"
-                        },
-                        "description": {
-                            "selector": "description"
                         },
                         "details": {
                             "selector": "comments"
@@ -333,33 +330,18 @@ class Jackett(_PluginBase):
                         },
                         "imdbid": {
                             "selector": "torznab|attr[name=imdbid]"
+                        },
+                        "downloadvolumefactor": {
+                            "case": {
+                                "*": 0
+                            }
+                        },
+                        "uploadvolumefactor": {
+                            "case": {
+                                "*": 1
+                            }
                         }
                     }
-                },
-                "result": {
-                    "type": "json",
-                    "result": {
-                        "list": "$.items[*]"
-                    },
-                    "fields": {
-                        "id": "$.guid",
-                        "title": "$.title",
-                        "description": "$.description",
-                        "details": "$.comments",
-                        "download": "$.link",
-                        "size": "$.size",
-                        "date_added": "$.pubDate",
-                        "seeders": "$.seeders",
-                        "leechers": "$.peers",
-                        "grabs": "$.grabs",
-                        "imdbid": "$.imdbid"
-                    }
-                },
-                "config": {
-                    "downloadvolumefactor": 0,
-                    "uploadvolumefactor": 1,
-                    "torrentMinSize": 10,
-                    "torrentMaxSize": 100000
                 }
             }
             
