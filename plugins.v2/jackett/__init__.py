@@ -19,7 +19,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.45"
+    plugin_version = "1.50"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -209,9 +209,36 @@ class Jackett(_PluginBase):
                     
                     print(f"【{self.plugin_name}】尝试直接写入系统配置...")
                     
-                    # 获取当前索引器配置
+                    # 获取当前索引器配置 - 兼容不同版本
                     config_oper = SystemConfigOper()
-                    indexers_config = config_oper.get(SystemConfigKey.UserIndexer) or {}
+                    indexers_config = {}
+                    
+                    # 尝试不同的配置键名
+                    try:
+                        # 尝试V2版本键名
+                        if hasattr(SystemConfigKey, "UserIndexer"):
+                            indexers_config = config_oper.get(SystemConfigKey.UserIndexer) or {}
+                            print(f"【{self.plugin_name}】使用SystemConfigKey.UserIndexer获取配置")
+                        # 尝试其他可能的键名
+                        elif hasattr(SystemConfigKey, "INDEXER"):
+                            indexers_config = config_oper.get(SystemConfigKey.INDEXER) or {}
+                            print(f"【{self.plugin_name}】使用SystemConfigKey.INDEXER获取配置")
+                        elif hasattr(SystemConfigKey, "Indexer"):
+                            indexers_config = config_oper.get(SystemConfigKey.Indexer) or {}
+                            print(f"【{self.plugin_name}】使用SystemConfigKey.Indexer获取配置")
+                        else:
+                            # 尝试使用字符串直接访问
+                            for possible_key in ["UserIndexer", "INDEXER", "Indexer", "indexer"]:
+                                try:
+                                    indexers_config = config_oper.get(possible_key) or {}
+                                    if indexers_config:
+                                        print(f"【{self.plugin_name}】使用字符串键'{possible_key}'成功获取配置")
+                                        break
+                                except Exception:
+                                    continue
+                    except Exception as e:
+                        print(f"【{self.plugin_name}】获取系统配置异常: {str(e)}")
+                        indexers_config = {}
                     
                     print(f"【{self.plugin_name}】当前系统索引器配置: {len(indexers_config)} 个索引器")
                     
@@ -234,11 +261,67 @@ class Jackett(_PluginBase):
                     
                     # 保存配置
                     if indexer_count > 0:
-                        config_oper.set(SystemConfigKey.UserIndexer, indexers_config)
-                        print(f"【{self.plugin_name}】成功保存 {indexer_count} 个索引器到系统配置")
+                        # 尝试不同的配置键名来保存
+                        save_success = False
+                        
+                        try:
+                            if hasattr(SystemConfigKey, "UserIndexer"):
+                                config_oper.set(SystemConfigKey.UserIndexer, indexers_config)
+                                save_success = True
+                                print(f"【{self.plugin_name}】使用SystemConfigKey.UserIndexer保存配置")
+                            elif hasattr(SystemConfigKey, "INDEXER"):
+                                config_oper.set(SystemConfigKey.INDEXER, indexers_config)
+                                save_success = True
+                                print(f"【{self.plugin_name}】使用SystemConfigKey.INDEXER保存配置")
+                            elif hasattr(SystemConfigKey, "Indexer"):
+                                config_oper.set(SystemConfigKey.Indexer, indexers_config)
+                                save_success = True
+                                print(f"【{self.plugin_name}】使用SystemConfigKey.Indexer保存配置")
+                            else:
+                                # 尝试使用字符串直接保存
+                                for possible_key in ["UserIndexer", "INDEXER", "Indexer", "indexer"]:
+                                    try:
+                                        config_oper.set(possible_key, indexers_config)
+                                        save_success = True
+                                        print(f"【{self.plugin_name}】使用字符串键'{possible_key}'成功保存配置")
+                                        break
+                                    except Exception:
+                                        continue
+                        except Exception as e:
+                            print(f"【{self.plugin_name}】保存配置异常: {str(e)}")
+                            
+                        if save_success:
+                            print(f"【{self.plugin_name}】成功保存 {indexer_count} 个索引器到系统配置")
+                        else:
+                            print(f"【{self.plugin_name}】尝试了所有可能的配置键，仍无法保存索引器配置")
                     
                     # 尝试触发配置重载
                     try:
+                        # 尝试直接调用站点服务刷新
+                        try:
+                            from app.services.indexer import IndexerService
+                            print(f"【{self.plugin_name}】尝试直接调用站点服务刷新...")
+                            indexer_service = IndexerService()
+                            
+                            # 尝试不同的刷新方法
+                            if hasattr(indexer_service, "init_builtin"):
+                                indexer_service.init_builtin()
+                                print(f"【{self.plugin_name}】成功调用站点服务init_builtin方法")
+                            
+                            if hasattr(indexer_service, "init_indexer"):
+                                indexer_service.init_indexer()
+                                print(f"【{self.plugin_name}】成功调用站点服务init_indexer方法")
+                            
+                            if hasattr(indexer_service, "refresh"):
+                                indexer_service.refresh()
+                                print(f"【{self.plugin_name}】成功调用站点服务refresh方法")
+                            
+                            print(f"【{self.plugin_name}】站点服务刷新完成")
+                        except Exception as e:
+                            print(f"【{self.plugin_name}】直接调用站点服务刷新失败: {str(e)}")
+                            import traceback
+                            print(f"【{self.plugin_name}】刷新异常详情: {traceback.format_exc()}")
+                        
                         # 尝试发送模块重载事件
                         from app.helper.event import EventManager
                         from app.schemas.types import EventType
@@ -247,81 +330,114 @@ class Jackett(_PluginBase):
                         event_manager = EventManager()
                         event_manager.send_event(EventType.ModuleReload)
                         print(f"【{self.plugin_name}】模块重载事件已发送")
+                        
+                        # 尝试发送站点刷新事件
+                        event_manager.send_event(EventType.SiteRefreshed)
+                        print(f"【{self.plugin_name}】站点刷新事件已发送")
                     except Exception as e:
                         print(f"【{self.plugin_name}】发送模块重载事件失败: {str(e)}")
-                        
-                except Exception as e:
-                    print(f"【{self.plugin_name}】直接写入系统配置失败: {str(e)}")
-                    import traceback
-                    print(f"【{self.plugin_name}】写入配置异常详情: {traceback.format_exc()}")
-                
-                # 检查是否有 refresh_indexer 方法
-                if hasattr(sites_helper, "refresh_indexer"):
-                    print(f"【{self.plugin_name}】尝试刷新索引器列表...")
-                    sites_helper.refresh_indexer()
-                    print(f"【{self.plugin_name}】索引器列表刷新完成")
-                else:
-                    print(f"【{self.plugin_name}】SitesHelper 没有 refresh_indexer 方法")
-                
-                # 检查是否有 init_indexer 方法
-                if hasattr(sites_helper, "init_indexer"):
-                    print(f"【{self.plugin_name}】尝试初始化索引器...")
-                    sites_helper.init_indexer()
-                    print(f"【{self.plugin_name}】索引器初始化完成")
-                else:
-                    print(f"【{self.plugin_name}】SitesHelper 没有 init_indexer 方法")
-                
-                # 尝试其他可能的激活方法
-                if hasattr(sites_helper, "init"):
-                    print(f"【{self.plugin_name}】尝试调用init方法...")
-                    sites_helper.init()
-                
-                if hasattr(sites_helper, "init_builtin"):
-                    print(f"【{self.plugin_name}】尝试初始化内置索引器...")
-                    sites_helper.init_builtin()
-                
-                if hasattr(sites_helper, "refresh"):
-                    print(f"【{self.plugin_name}】尝试调用refresh方法...")
-                    sites_helper.refresh()
-                
-                # 尝试重新加载配置
-                if hasattr(sites_helper, "load_config"):
-                    print(f"【{self.plugin_name}】尝试重新加载配置...")
-                    sites_helper.load_config()
-                
-                # 强制刷新缓存
-                if hasattr(sites_helper, "clear_cache"):
-                    print(f"【{self.plugin_name}】尝试清除缓存...")
-                    sites_helper.clear_cache()
-                
-                # 尝试发送刷新事件
-                try:
-                    from app.helper.event import EventManager
-                    from app.schemas.types import EventType
                     
-                    print(f"【{self.plugin_name}】尝试发送站点刷新事件...")
-                    EventManager().send_event(EventType.SiteRefreshed)
-                    print(f"【{self.plugin_name}】站点刷新事件已发送")
-                except Exception as e:
-                    print(f"【{self.plugin_name}】发送刷新事件失败: {str(e)}")
-                
-                # 直接获取所有站点检查是否添加成功
-                sites = None
-                if hasattr(sites_helper, "get_indexers"):
-                    sites = sites_helper.get_indexers()
-                elif hasattr(sites_helper, "get_all_indexers"):
-                    sites = sites_helper.get_all_indexers()
-                
-                if sites:
-                    # 检查sites是列表还是字典，并相应地处理
-                    if isinstance(sites, dict):
-                        jackett_sites = [s for s in sites.keys() if isinstance(s, str) and s.startswith("jackett_")]
+                    # 检查是否有 refresh_indexer 方法
+                    if hasattr(sites_helper, "refresh_indexer"):
+                        print(f"【{self.plugin_name}】尝试刷新索引器列表...")
+                        sites_helper.refresh_indexer()
+                        print(f"【{self.plugin_name}】索引器列表刷新完成")
                     else:
-                        jackett_sites = [s for s in sites if isinstance(s, str) and s.startswith("jackett_")]
+                        print(f"【{self.plugin_name}】SitesHelper 没有 refresh_indexer 方法")
                     
-                    print(f"【{self.plugin_name}】系统当前共有 {len(jackett_sites)} 个 Jackett 索引器: {jackett_sites}")
-                else:
-                    print(f"【{self.plugin_name}】无法获取系统索引器列表")
+                    # 检查是否有 init_indexer 方法
+                    if hasattr(sites_helper, "init_indexer"):
+                        print(f"【{self.plugin_name}】尝试初始化索引器...")
+                        sites_helper.init_indexer()
+                        print(f"【{self.plugin_name}】索引器初始化完成")
+                    else:
+                        print(f"【{self.plugin_name}】SitesHelper 没有 init_indexer 方法")
+                    
+                    # 尝试其他可能的激活方法
+                    if hasattr(sites_helper, "init"):
+                        print(f"【{self.plugin_name}】尝试调用init方法...")
+                        sites_helper.init()
+                    
+                    if hasattr(sites_helper, "init_builtin"):
+                        print(f"【{self.plugin_name}】尝试初始化内置索引器...")
+                        sites_helper.init_builtin()
+                    
+                    if hasattr(sites_helper, "refresh"):
+                        print(f"【{self.plugin_name}】尝试调用refresh方法...")
+                        sites_helper.refresh()
+                    
+                    # 尝试重新加载配置
+                    if hasattr(sites_helper, "load_config"):
+                        print(f"【{self.plugin_name}】尝试重新加载配置...")
+                        sites_helper.load_config()
+                    
+                    # 强制刷新缓存
+                    if hasattr(sites_helper, "clear_cache"):
+                        print(f"【{self.plugin_name}】尝试清除缓存...")
+                        sites_helper.clear_cache()
+                    
+                    # 尝试发送刷新事件
+                    try:
+                        # 尝试直接调用站点服务刷新
+                        try:
+                            from app.services.indexer import IndexerService
+                            print(f"【{self.plugin_name}】尝试直接调用站点服务刷新...")
+                            indexer_service = IndexerService()
+                            
+                            # 尝试不同的刷新方法
+                            if hasattr(indexer_service, "init_builtin"):
+                                indexer_service.init_builtin()
+                                print(f"【{self.plugin_name}】成功调用站点服务init_builtin方法")
+                            
+                            if hasattr(indexer_service, "init_indexer"):
+                                indexer_service.init_indexer()
+                                print(f"【{self.plugin_name}】成功调用站点服务init_indexer方法")
+                            
+                            if hasattr(indexer_service, "refresh"):
+                                indexer_service.refresh()
+                                print(f"【{self.plugin_name}】成功调用站点服务refresh方法")
+                            
+                            print(f"【{self.plugin_name}】站点服务刷新完成")
+                        except Exception as e:
+                            print(f"【{self.plugin_name}】直接调用站点服务刷新失败: {str(e)}")
+                            import traceback
+                            print(f"【{self.plugin_name}】刷新异常详情: {traceback.format_exc()}")
+                        
+                        # 尝试发送模块重载事件
+                        from app.helper.event import EventManager
+                        from app.schemas.types import EventType
+                        EventManager().send_event(EventType.ModuleReload)
+                        print(f"【{self.plugin_name}】成功发送模块重载事件")
+                        
+                        # 尝试发送站点刷新事件
+                        EventManager().send_event(EventType.SiteRefreshed)
+                        print(f"【{self.plugin_name}】成功发送站点刷新事件")
+                    except Exception as e:
+                        print(f"【{self.plugin_name}】发送刷新事件失败: {str(e)}")
+                    
+                    # 直接获取所有站点检查是否添加成功
+                    sites = None
+                    if hasattr(sites_helper, "get_indexers"):
+                        sites = sites_helper.get_indexers()
+                    elif hasattr(sites_helper, "get_all_indexers"):
+                        sites = sites_helper.get_all_indexers()
+                    
+                    if sites:
+                        # 检查sites是列表还是字典，并相应地处理
+                        if isinstance(sites, dict):
+                            jackett_sites = [s for s in sites.keys() if isinstance(s, str) and s.startswith("jackett_")]
+                        else:
+                            jackett_sites = [s for s in sites if isinstance(s, str) and s.startswith("jackett_")]
+                        
+                        print(f"【{self.plugin_name}】系统当前共有 {len(jackett_sites)} 个 Jackett 索引器: {jackett_sites}")
+                    else:
+                        print(f"【{self.plugin_name}】无法获取系统索引器列表")
+                    
+                except Exception as e:
+                    print(f"【{self.plugin_name}】尝试刷新索引器异常: {str(e)}")
+                    # 打印异常的详细堆栈信息，帮助调试
+                    import traceback
+                    print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
                 
             except Exception as e:
                 print(f"【{self.plugin_name}】尝试刷新索引器异常: {str(e)}")
@@ -457,7 +573,32 @@ class Jackett(_PluginBase):
             indexer_id = jackett_indexer.get("id", "")
             indexer_name = jackett_indexer.get("name", "")
             
-            # 使用极简格式，只保留必要字段
+            # 添加分类支持，使索引器支持影视搜索
+            # 使用通用的Torznab分类
+            category_config = {
+                "movie": [
+                    {"id": "2000", "desc": "Movies"},  # 电影主分类
+                    {"id": "2010", "desc": "Movies/Foreign"},
+                    {"id": "2020", "desc": "Movies/BluRay"},
+                    {"id": "2030", "desc": "Movies/DVD"},
+                    {"id": "2040", "desc": "Movies/HD"},
+                    {"id": "2045", "desc": "Movies/UHD"},
+                    {"id": "2050", "desc": "Movies/3D"},
+                    {"id": "2060", "desc": "Movies/SD"}
+                ],
+                "tv": [
+                    {"id": "5000", "desc": "TV"},  # 电视剧主分类
+                    {"id": "5020", "desc": "TV/Blu-ray"},
+                    {"id": "5030", "desc": "TV/DVD"},
+                    {"id": "5040", "desc": "TV/HD"},
+                    {"id": "5050", "desc": "TV/SD"},
+                    {"id": "5060", "desc": "TV/Foreign"},
+                    {"id": "5070", "desc": "TV/Sport"},
+                    {"id": "5080", "desc": "TV/Anime"}
+                ]
+            }
+            
+            # 使用MoviePilot支持的格式
             mp_indexer = {
                 "id": f"jackett_{indexer_id.lower()}",
                 "name": f"[Jackett] {indexer_name}",
@@ -466,6 +607,11 @@ class Jackett(_PluginBase):
                 "encoding": "UTF-8",
                 "public": True,
                 "proxy": True,
+                "language": "zh_CN",  # 添加默认语言
+                "category": category_config,  # 添加分类
+                "builtin": False,  # 非内置
+                "result_type": "json",  # 结果类型
+                "parse": "xml",  # 解析类型
                 "search": {
                     "paths": [
                         {
@@ -476,6 +622,7 @@ class Jackett(_PluginBase):
                     "params": {
                         "t": "search",
                         "q": "{keyword}",
+                        "cat": "{cat}",  # 添加分类参数
                         "apikey": self._api_key
                     }
                 },
@@ -490,11 +637,18 @@ class Jackett(_PluginBase):
                         "title": {
                             "selector": "title"
                         },
+                        "details": {
+                            "selector": "guid"
+                        },
                         "download": {
                             "selector": "link"
                         },
                         "size": {
                             "selector": "size"
+                        },
+                        "date_added": {
+                            "selector": "pubDate",
+                            "optional": True
                         },
                         "seeders": {
                             "selector": "torznab|attr[name=seeders]",
@@ -503,6 +657,20 @@ class Jackett(_PluginBase):
                         "leechers": {
                             "selector": "torznab|attr[name=peers]",
                             "default": "0"
+                        },
+                        "grabs": {
+                            "selector": "torznab|attr[name=grabs]",
+                            "default": "0"
+                        },
+                        "downloadvolumefactor": {
+                            "case": {
+                                "*": 0
+                            }
+                        },
+                        "uploadvolumefactor": {
+                            "case": {
+                                "*": 1
+                            }
                         }
                     }
                 }
@@ -879,9 +1047,36 @@ class Jackett(_PluginBase):
                 from app.db.systemconfig_oper import SystemConfigOper
                 from app.schemas.types import SystemConfigKey
                 
-                # 获取当前索引器配置
+                # 获取当前索引器配置 - 兼容不同版本
                 config_oper = SystemConfigOper()
-                indexers_config = config_oper.get(SystemConfigKey.UserIndexer) or {}
+                indexers_config = {}
+                
+                # 尝试不同的配置键名
+                try:
+                    # 尝试V2版本键名
+                    if hasattr(SystemConfigKey, "UserIndexer"):
+                        indexers_config = config_oper.get(SystemConfigKey.UserIndexer) or {}
+                        print(f"【{self.plugin_name}】使用SystemConfigKey.UserIndexer获取配置")
+                    # 尝试其他可能的键名
+                    elif hasattr(SystemConfigKey, "INDEXER"):
+                        indexers_config = config_oper.get(SystemConfigKey.INDEXER) or {}
+                        print(f"【{self.plugin_name}】使用SystemConfigKey.INDEXER获取配置")
+                    elif hasattr(SystemConfigKey, "Indexer"):
+                        indexers_config = config_oper.get(SystemConfigKey.Indexer) or {}
+                        print(f"【{self.plugin_name}】使用SystemConfigKey.Indexer获取配置")
+                    else:
+                        # 尝试使用字符串直接访问
+                        for possible_key in ["UserIndexer", "INDEXER", "Indexer", "indexer"]:
+                            try:
+                                indexers_config = config_oper.get(possible_key) or {}
+                                if indexers_config:
+                                    print(f"【{self.plugin_name}】使用字符串键'{possible_key}'成功获取配置")
+                                    break
+                            except Exception:
+                                continue
+                except Exception as e:
+                    print(f"【{self.plugin_name}】获取系统配置异常: {str(e)}")
+                    indexers_config = {}
                 
                 print(f"【{self.plugin_name}】当前系统索引器配置: {len(indexers_config)} 个索引器")
                 
@@ -904,15 +1099,78 @@ class Jackett(_PluginBase):
                     indexers_config[indexer_id] = indexer_config
                 
                 # 保存配置
-                config_oper.set(SystemConfigKey.UserIndexer, indexers_config)
-                print(f"【{self.plugin_name}】成功直接写入 {len(all_indexers)} 个索引器到系统配置")
+                save_success = False
+                        
+                try:
+                    if hasattr(SystemConfigKey, "UserIndexer"):
+                        config_oper.set(SystemConfigKey.UserIndexer, indexers_config)
+                        save_success = True
+                        print(f"【{self.plugin_name}】使用SystemConfigKey.UserIndexer保存配置")
+                    elif hasattr(SystemConfigKey, "INDEXER"):
+                        config_oper.set(SystemConfigKey.INDEXER, indexers_config)
+                        save_success = True
+                        print(f"【{self.plugin_name}】使用SystemConfigKey.INDEXER保存配置")
+                    elif hasattr(SystemConfigKey, "Indexer"):
+                        config_oper.set(SystemConfigKey.Indexer, indexers_config)
+                        save_success = True
+                        print(f"【{self.plugin_name}】使用SystemConfigKey.Indexer保存配置")
+                    else:
+                        # 尝试使用字符串直接保存
+                        for possible_key in ["UserIndexer", "INDEXER", "Indexer", "indexer"]:
+                            try:
+                                config_oper.set(possible_key, indexers_config)
+                                save_success = True
+                                print(f"【{self.plugin_name}】使用字符串键'{possible_key}'成功保存配置")
+                                break
+                            except Exception:
+                                continue
+                except Exception as e:
+                    print(f"【{self.plugin_name}】保存配置异常: {str(e)}")
+                    
+                if save_success:
+                    print(f"【{self.plugin_name}】成功直接写入 {len(all_indexers)} 个索引器到系统配置")
+                else:
+                    print(f"【{self.plugin_name}】尝试了所有可能的配置键，仍无法保存索引器配置")
                 
                 # 尝试发送刷新事件
                 try:
+                    # 尝试直接调用站点服务刷新
+                    try:
+                        from app.services.indexer import IndexerService
+                        print(f"【{self.plugin_name}】尝试直接调用站点服务刷新...")
+                        indexer_service = IndexerService()
+                        
+                        # 尝试不同的刷新方法
+                        if hasattr(indexer_service, "init_builtin"):
+                            indexer_service.init_builtin()
+                            print(f"【{self.plugin_name}】成功调用站点服务init_builtin方法")
+                        
+                        if hasattr(indexer_service, "init_indexer"):
+                            indexer_service.init_indexer()
+                            print(f"【{self.plugin_name}】成功调用站点服务init_indexer方法")
+                        
+                        if hasattr(indexer_service, "refresh"):
+                            indexer_service.refresh()
+                            print(f"【{self.plugin_name}】成功调用站点服务refresh方法")
+                        
+                        print(f"【{self.plugin_name}】站点服务刷新完成")
+                    except Exception as e:
+                        print(f"【{self.plugin_name}】直接调用站点服务刷新失败: {str(e)}")
+                        import traceback
+                        print(f"【{self.plugin_name}】刷新异常详情: {traceback.format_exc()}")
+                    
+                    # 尝试发送模块重载事件
                     from app.helper.event import EventManager
                     from app.schemas.types import EventType
-                    EventManager().send_event(EventType.ModuleReload)
+                    
+                    print(f"【{self.plugin_name}】尝试发送模块重载事件...")
+                    event_manager = EventManager()
+                    event_manager.send_event(EventType.ModuleReload)
                     print(f"【{self.plugin_name}】成功发送模块重载事件")
+                    
+                    # 尝试发送站点刷新事件
+                    event_manager.send_event(EventType.SiteRefreshed)
+                    print(f"【{self.plugin_name}】成功发送站点刷新事件")
                 except Exception as e:
                     print(f"【{self.plugin_name}】发送刷新事件失败: {str(e)}")
                 
