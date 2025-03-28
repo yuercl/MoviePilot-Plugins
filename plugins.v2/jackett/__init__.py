@@ -6,6 +6,7 @@ import os
 import time
 import xml.dom.minidom
 from urllib.parse import urljoin
+import requests
 
 class Jackett(_PluginBase):
     """
@@ -18,7 +19,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.14"
+    plugin_version = "1.15"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -183,16 +184,17 @@ class Jackett(_PluginBase):
         try:
             # 设置请求头
             headers = {
-                "Content-Type": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                 "User-Agent": "MoviePilot/1.0",
                 "X-Api-Key": self._api_key,
-                "Accept": "application/json"
+                "Accept": "application/json, text/javascript, */*; q=0.01"
             }
             
             print(f"【{self.plugin_name}】请求头: {headers}")
             
-            # 创建请求工具实例
-            req = RequestUtils(headers=headers)
+            # 创建session并设置headers
+            session = requests.session()
+            req = RequestUtils(headers=headers, session=session)
             
             # 如果设置了密码，则进行认证
             if self._password:
@@ -208,8 +210,8 @@ class Jackett(_PluginBase):
                     params=auth_params
                 )
                 
-                if dashboard_res and dashboard_res.cookies:
-                    self._cookies = dict(dashboard_res.cookies)
+                if dashboard_res and session.cookies:
+                    self._cookies = session.cookies.get_dict()
                     print(f"【{self.plugin_name}】成功获取Cookie: {self._cookies}")
                 else:
                     print(f"【{self.plugin_name}】获取Cookie失败")
@@ -221,13 +223,12 @@ class Jackett(_PluginBase):
             while current_try <= max_retries:
                 try:
                     # 使用正确的API路径
-                    indexer_query_url = f"{self._host}/api/v2.0/indexers/all"
+                    indexer_query_url = f"{self._host}/api/v2.0/indexers?configured=true"
                     print(f"【{self.plugin_name}】请求索引器列表 (第{current_try}次尝试): {indexer_query_url}")
                     
                     # 请求API
                     response = req.get_res(
                         url=indexer_query_url,
-                        cookies=self._cookies,
                         verify=False
                     )
                     
@@ -237,42 +238,16 @@ class Jackett(_PluginBase):
                         
                         if response.status_code == 200:
                             try:
-                                # 检查响应类型
-                                content_type = response.headers.get('content-type', '').lower()
-                                if 'application/json' not in content_type:
-                                    print(f"【{self.plugin_name}】响应不是JSON格式: {content_type}")
-                                    print(f"【{self.plugin_name}】响应内容: {response.text[:500]}...")
-                                    if current_try < max_retries:
-                                        print(f"【{self.plugin_name}】{retry_interval}秒后进行第{current_try + 1}次重试...")
-                                        time.sleep(retry_interval)
-                                        current_try += 1
-                                        continue
-                                    break
-                                
                                 # 尝试解析JSON
-                                try:
-                                    indexers = response.json()
-                                except Exception as e:
-                                    print(f"【{self.plugin_name}】JSON解析失败: {str(e)}")
-                                    print(f"【{self.plugin_name}】响应内容: {response.text[:500]}...")
-                                    if current_try < max_retries:
-                                        print(f"【{self.plugin_name}】{retry_interval}秒后进行第{current_try + 1}次重试...")
-                                        time.sleep(retry_interval)
-                                        current_try += 1
-                                        continue
-                                    break
-                                
+                                indexers = response.json()
                                 if indexers and isinstance(indexers, list):
-                                    # 过滤已配置的索引器
-                                    configured_indexers = [idx for idx in indexers if idx.get("configured", False)]
-                                    print(f"【{self.plugin_name}】成功获取到{len(configured_indexers)}个已配置的索引器")
-                                    return configured_indexers
+                                    print(f"【{self.plugin_name}】成功获取到{len(indexers)}个索引器")
+                                    return indexers
                                 else:
                                     print(f"【{self.plugin_name}】解析索引器列表失败: 无效的JSON响应")
                             except Exception as e:
                                 print(f"【{self.plugin_name}】解析索引器列表JSON异常: {str(e)}")
-                                if response and hasattr(response, 'text'):
-                                    print(f"【{self.plugin_name}】响应内容: {response.text[:500]}...")
+                                print(f"【{self.plugin_name}】响应内容: {response.text[:500]}...")
                         elif response.status_code == 401:
                             print(f"【{self.plugin_name}】认证失败，请检查API Key是否正确")
                             break
