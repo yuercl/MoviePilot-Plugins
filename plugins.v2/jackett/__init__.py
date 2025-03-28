@@ -18,7 +18,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.10"
+    plugin_version = "1.11"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -183,10 +183,8 @@ class Jackett(_PluginBase):
         try:
             # 设置请求头
             headers = {
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36",
-                "X-Api-Key": self._api_key,
-                "Accept": "application/json"
+                "Accept": "application/json",
+                "X-Api-Key": self._api_key
             }
             
             # 创建会话
@@ -194,48 +192,13 @@ class Jackett(_PluginBase):
                 print(f"【{self.plugin_name}】初始化会话...")
                 self._session = {}
             
-            # 处理登录 - 添加重试机制
-            if self._password:
-                while current_try <= max_retries:
-                    try:
-                        print(f"【{self.plugin_name}】尝试使用密码登录Jackett (第{current_try}次尝试)...")
-                        login_url = f"{self._host}/UI/Dashboard"
-                        login_data = {"password": self._password}
-                        
-                        login_response = RequestUtils(
-                            headers=headers,
-                            timeout=30
-                        ).post_res(
-                            url=login_url, 
-                            data=login_data
-                        )
-                        
-                        if login_response and login_response.status_code == 200:
-                            self._cookies = login_response.cookies.get_dict()
-                            print(f"【{self.plugin_name}】Jackett登录成功，获取到Cookie: {self._cookies}")
-                            break
-                        else:
-                            error_msg = f"状态码 {login_response.status_code if login_response else 'None'}"
-                            print(f"【{self.plugin_name}】Jackett登录失败: {error_msg}")
-                            
-                            if current_try < max_retries:
-                                print(f"【{self.plugin_name}】{retry_interval}秒后进行第{current_try + 1}次重试...")
-                                time.sleep(retry_interval)
-                            current_try += 1
-                    except Exception as e:
-                        print(f"【{self.plugin_name}】Jackett登录异常: {str(e)}")
-                        if current_try < max_retries:
-                            print(f"【{self.plugin_name}】{retry_interval}秒后进行第{current_try + 1}次重试...")
-                            time.sleep(retry_interval)
-                        current_try += 1
-            
             # 重置重试计数
             current_try = 1
             
             # 获取索引器列表 - 添加重试机制
             while current_try <= max_retries:
                 try:
-                    # 修改API路径
+                    # 使用正确的API路径
                     indexer_query_url = f"{self._host}/api/v2.0/indexers/all"
                     print(f"【{self.plugin_name}】请求索引器列表 (第{current_try}次尝试): {indexer_query_url}")
                     
