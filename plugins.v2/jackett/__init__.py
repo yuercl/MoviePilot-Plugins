@@ -19,7 +19,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.31"
+    plugin_version = "1.40"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -151,15 +151,42 @@ class Jackett(_PluginBase):
                     elif hasattr(sites_helper, "get_all_indexers"):
                         existing_sites = sites_helper.get_all_indexers() or []
                     
-                    if domain in existing_sites:
-                        print(f"【{self.plugin_name}】索引器已存在，先移除: {domain}")
-                        sites_helper.remove_indexer(domain=domain)
+                    if isinstance(existing_sites, dict):
+                        existing_keys = existing_sites.keys()
+                        exists = domain in existing_keys
+                    else:
+                        exists = domain in existing_sites
                     
-                    # 添加索引器
-                    sites_helper.add_indexer(domain=domain, indexer=mp_indexer)
-                    self._added_indexers.append(domain)
-                    new_added.append(domain)
-                    print(f"【{self.plugin_name}】成功添加索引器: {indexer.get('name')} -> {domain}")
+                    if exists:
+                        print(f"【{self.plugin_name}】索引器已存在，先移除: {domain}")
+                        try:
+                            if hasattr(sites_helper, "remove_indexer"):
+                                sites_helper.remove_indexer(domain=domain)
+                            elif hasattr(sites_helper, "delete_indexer"):
+                                sites_helper.delete_indexer(domain=domain)
+                        except Exception as e:
+                            print(f"【{self.plugin_name}】移除已存在索引器失败: {str(e)}")
+                    
+                    # 添加索引器前进行必要准备
+                    print(f"【{self.plugin_name}】尝试添加索引器: {indexer.get('name')} -> {domain}")
+                    
+                    # 注册索引器到系统
+                    try:
+                        # 先尝试直接添加
+                        sites_helper.add_indexer(domain=domain, indexer=mp_indexer)
+                        
+                        # 尝试其他可能的注册方法
+                        if hasattr(sites_helper, "register_indexer"):
+                            sites_helper.register_indexer(domain=domain, url=self._host)
+                        
+                        # 添加到成功列表
+                        self._added_indexers.append(domain)
+                        new_added.append(domain)
+                        print(f"【{self.plugin_name}】成功添加索引器: {indexer.get('name')} -> {domain}")
+                    except Exception as e:
+                        print(f"【{self.plugin_name}】添加索引器失败: {indexer.get('name')} - {str(e)}")
+                        import traceback
+                        print(f"【{self.plugin_name}】添加索引器异常详情: {traceback.format_exc()}")
                 except Exception as e:
                     print(f"【{self.plugin_name}】添加索引器失败: {indexer.get('name')} - {str(e)}")
             
@@ -167,6 +194,9 @@ class Jackett(_PluginBase):
             
             # 尝试直接激活索引器，这是关键的一步
             try:
+                # 尝试多种可能的刷新/初始化方法
+                print(f"【{self.plugin_name}】尝试多种方法激活索引器...")
+                
                 # 检查是否有 refresh_indexer 方法
                 if hasattr(sites_helper, "refresh_indexer"):
                     print(f"【{self.plugin_name}】尝试刷新索引器列表...")
@@ -182,6 +212,40 @@ class Jackett(_PluginBase):
                     print(f"【{self.plugin_name}】索引器初始化完成")
                 else:
                     print(f"【{self.plugin_name}】SitesHelper 没有 init_indexer 方法")
+                
+                # 尝试其他可能的激活方法
+                if hasattr(sites_helper, "init"):
+                    print(f"【{self.plugin_name}】尝试调用init方法...")
+                    sites_helper.init()
+                
+                if hasattr(sites_helper, "init_builtin"):
+                    print(f"【{self.plugin_name}】尝试初始化内置索引器...")
+                    sites_helper.init_builtin()
+                
+                if hasattr(sites_helper, "refresh"):
+                    print(f"【{self.plugin_name}】尝试调用refresh方法...")
+                    sites_helper.refresh()
+                
+                # 尝试重新加载配置
+                if hasattr(sites_helper, "load_config"):
+                    print(f"【{self.plugin_name}】尝试重新加载配置...")
+                    sites_helper.load_config()
+                
+                # 强制刷新缓存
+                if hasattr(sites_helper, "clear_cache"):
+                    print(f"【{self.plugin_name}】尝试清除缓存...")
+                    sites_helper.clear_cache()
+                
+                # 尝试发送刷新事件
+                try:
+                    from app.helper.event import EventManager
+                    from app.schemas.types import EventType
+                    
+                    print(f"【{self.plugin_name}】尝试发送站点刷新事件...")
+                    EventManager().send_event(EventType.SiteRefreshed)
+                    print(f"【{self.plugin_name}】站点刷新事件已发送")
+                except Exception as e:
+                    print(f"【{self.plugin_name}】发送刷新事件失败: {str(e)}")
                 
                 # 直接获取所有站点检查是否添加成功
                 sites = None
@@ -340,13 +404,13 @@ class Jackett(_PluginBase):
                 "id": f"jackett_{indexer_id.lower()}",
                 "name": f"[Jackett] {indexer_name}",
                 "domain": self._host,
-                "url": self._host,  # 添加url字段
+                "url": self._host,
                 "encoding": "UTF-8",
-                "public": True,  # 设置为公共索引器
-                "proxy": False,
-                "language": "zh_CN",  # 添加语言设置
-                "site": "http://127.0.0.1/", # 添加一个虚拟站点地址
-                "builtin": True,  # 设置为内置索引器
+                "public": False,  # 修改为私有索引器更容易被识别
+                "proxy": True,    # 启用代理选项
+                "language": "zh_CN",
+                "site": f"{self._host}/UI/Dashboard",  # 使用正确的站点地址
+                "builtin": False,  # 设置为非内置索引器
                 "category": {
                     "movie": [
                         {
@@ -377,6 +441,8 @@ class Jackett(_PluginBase):
                         "apikey": self._api_key
                     }
                 },
+                "result_num": 100,  # 添加结果数量限制
+                "timeout": 30,      # 添加超时设置
                 "torrents": {
                     "list": {
                         "selector": "item"
@@ -387,6 +453,9 @@ class Jackett(_PluginBase):
                         },
                         "title": {
                             "selector": "title"
+                        },
+                        "details": {
+                            "selector": "guid"
                         },
                         "download": {
                             "selector": "link"
