@@ -18,7 +18,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.12"
+    plugin_version = "1.13"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -191,25 +191,25 @@ class Jackett(_PluginBase):
             
             print(f"【{self.plugin_name}】请求头: {headers}")
             
-            # 创建会话并获取Cookie
-            session = RequestUtils().session
-            dashboard_url = f"{self._host}/UI/Dashboard"
-            print(f"【{self.plugin_name}】尝试访问Dashboard获取Cookie: {dashboard_url}")
+            # 创建请求工具实例
+            req = RequestUtils(headers=headers)
             
             # 如果设置了密码，则进行认证
             if self._password:
+                dashboard_url = f"{self._host}/UI/Dashboard"
+                print(f"【{self.plugin_name}】尝试访问Dashboard进行认证: {dashboard_url}")
+                
                 auth_data = {"password": self._password}
                 auth_params = {"password": self._password}
-                dashboard_res = RequestUtils(
-                    headers=headers,
-                    session=session
-                ).post_res(
+                
+                dashboard_res = req.post_res(
                     url=dashboard_url,
                     data=auth_data,
                     params=auth_params
                 )
-                if dashboard_res and session.cookies:
-                    self._cookies = session.cookies.get_dict()
+                
+                if dashboard_res and dashboard_res.cookies:
+                    self._cookies = dict(dashboard_res.cookies)
                     print(f"【{self.plugin_name}】成功获取Cookie: {self._cookies}")
                 else:
                     print(f"【{self.plugin_name}】获取Cookie失败")
@@ -225,12 +225,11 @@ class Jackett(_PluginBase):
                     print(f"【{self.plugin_name}】请求索引器列表 (第{current_try}次尝试): {indexer_query_url}")
                     
                     # 请求API
-                    response = RequestUtils(
-                        headers=headers,
+                    response = req.get_res(
+                        url=indexer_query_url,
                         cookies=self._cookies,
-                        timeout=30,
                         verify=False
-                    ).get_res(indexer_query_url)
+                    )
                     
                     if response:
                         print(f"【{self.plugin_name}】收到响应: HTTP {response.status_code}")
@@ -241,6 +240,7 @@ class Jackett(_PluginBase):
                                 # 检查响应是否为有效的JSON
                                 if not RequestUtils.check_response_is_valid_json(response):
                                     print(f"【{self.plugin_name}】响应不是有效的JSON格式")
+                                    print(f"【{self.plugin_name}】响应内容: {response.text[:500]}...")
                                     if current_try < max_retries:
                                         print(f"【{self.plugin_name}】{retry_interval}秒后进行第{current_try + 1}次重试...")
                                         time.sleep(retry_interval)
@@ -266,6 +266,8 @@ class Jackett(_PluginBase):
                             break
                         else:
                             print(f"【{self.plugin_name}】获取索引器列表失败: HTTP {response.status_code}")
+                            if response and hasattr(response, 'text'):
+                                print(f"【{self.plugin_name}】响应内容: {response.text[:500]}...")
                     else:
                         print(f"【{self.plugin_name}】获取索引器列表失败: 无响应")
                     
