@@ -19,7 +19,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.21"
+    plugin_version = "1.22"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -77,6 +77,7 @@ class Jackett(_PluginBase):
             # 导入SitesHelper
             try:
                 from app.helper.sites import SitesHelper
+                from app.utils.types import SearchType
                 print(f"【{self.plugin_name}】成功导入SitesHelper")
             except Exception as e:
                 print(f"【{self.plugin_name}】导入SitesHelper失败: {str(e)}")
@@ -92,6 +93,15 @@ class Jackett(_PluginBase):
             
             # 添加索引器到MoviePilot
             sites_helper = SitesHelper()
+            
+            # 先移除已添加的索引器，避免重复
+            try:
+                self._remove_jackett_indexers()
+            except Exception as e:
+                print(f"【{self.plugin_name}】移除旧索引器异常: {str(e)}")
+            
+            # 清空已添加索引器列表
+            self._added_indexers = []
             
             # 存储添加的索引器
             new_added = []
@@ -122,6 +132,40 @@ class Jackett(_PluginBase):
                     print(f"【{self.plugin_name}】添加索引器失败: {indexer.get('name')} - {str(e)}")
             
             print(f"【{self.plugin_name}】本次新增{len(new_added)}个索引器，共加入{len(self._added_indexers)}个索引器")
+            
+            # 尝试直接激活索引器，这是关键的一步
+            try:
+                # 检查是否有 refresh_indexer 方法
+                if hasattr(sites_helper, "refresh_indexer"):
+                    print(f"【{self.plugin_name}】尝试刷新索引器列表...")
+                    sites_helper.refresh_indexer()
+                    print(f"【{self.plugin_name}】索引器列表刷新完成")
+                else:
+                    print(f"【{self.plugin_name}】SitesHelper 没有 refresh_indexer 方法")
+                
+                # 检查是否有 init_indexer 方法
+                if hasattr(sites_helper, "init_indexer"):
+                    print(f"【{self.plugin_name}】尝试初始化索引器...")
+                    sites_helper.init_indexer()
+                    print(f"【{self.plugin_name}】索引器初始化完成")
+                else:
+                    print(f"【{self.plugin_name}】SitesHelper 没有 init_indexer 方法")
+                
+                # 直接获取所有站点检查是否添加成功
+                sites = None
+                if hasattr(sites_helper, "get_indexers"):
+                    sites = sites_helper.get_indexers()
+                elif hasattr(sites_helper, "get_all_indexers"):
+                    sites = sites_helper.get_all_indexers()
+                
+                if sites:
+                    jackett_sites = [s for s in sites if s.startswith("jackett_")]
+                    print(f"【{self.plugin_name}】系统当前共有 {len(jackett_sites)} 个 Jackett 索引器: {jackett_sites}")
+                else:
+                    print(f"【{self.plugin_name}】无法获取系统索引器列表")
+                
+            except Exception as e:
+                print(f"【{self.plugin_name}】尝试刷新索引器异常: {str(e)}")
             
         except Exception as e:
             print(f"【{self.plugin_name}】添加Jackett索引器异常: {str(e)}")
@@ -253,15 +297,14 @@ class Jackett(_PluginBase):
             
             # 基本配置
             mp_indexer = {
-                "id": f"jackett_{indexer_id}",
+                "id": f"jackett_{indexer_id.lower()}",
                 "name": f"[Jackett] {indexer_name}",
                 "domain": self._host,
                 "encoding": "UTF-8",
                 "public": True,
                 "proxy": False,
-                "params": {
-                    "apikey": self._api_key
-                },
+                "language": "zh_CN",
+                "result_type": "json",
                 "category": {
                     "movie": [
                         {
@@ -304,8 +347,13 @@ class Jackett(_PluginBase):
                         "title": {
                             "selector": "title"
                         },
+                        "description": {
+                            "selector": "description",
+                            "optional": True
+                        },
                         "details": {
-                            "selector": "comments"
+                            "selector": "comments",
+                            "optional": True
                         },
                         "download": {
                             "selector": "link"
@@ -329,7 +377,8 @@ class Jackett(_PluginBase):
                             "default": "0"
                         },
                         "imdbid": {
-                            "selector": "torznab|attr[name=imdbid]"
+                            "selector": "torznab|attr[name=imdbid]",
+                            "optional": True
                         },
                         "downloadvolumefactor": {
                             "case": {
@@ -441,34 +490,63 @@ class Jackett(_PluginBase):
                 }
             },
             {
-                'component': 'VBtn',
-                'props': {
-                    'color': 'primary',
-                    'block': True,
-                    'class': 'mb-4'
-                },
-                'text': '刷新索引器列表',
-                'events': [
+                'component': 'VRow',
+                'content': [
                     {
-                        'name': 'click',
-                        'value': 'this.get_indexers()'
+                        'component': 'VCol',
+                        'props': {
+                            'cols': 6
+                        },
+                        'content': [
+                            {
+                                'component': 'VBtn',
+                                'props': {
+                                    'color': 'primary',
+                                    'block': True,
+                                    'class': 'mb-4'
+                                },
+                                'text': '刷新索引器列表',
+                                'events': [
+                                    {
+                                        'name': 'click',
+                                        'value': 'this.refreshIndexers()'
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        'component': 'VCol',
+                        'props': {
+                            'cols': 6
+                        },
+                        'content': [
+                            {
+                                'component': 'VBtn',
+                                'props': {
+                                    'color': 'success',
+                                    'block': True,
+                                    'class': 'mb-4'
+                                },
+                                'text': '重新加载索引器到搜索系统',
+                                'events': [
+                                    {
+                                        'name': 'click',
+                                        'value': 'this.reloadIndexers()'
+                                    }
+                                ]
+                            }
+                        ]
                     }
                 ]
             },
             {
-                'component': 'VBtn',
+                'component': 'VAlert',
                 'props': {
-                    'color': 'success',
-                    'block': True,
+                    'type': 'warning',
+                    'text': '如果索引器列表为空，请检查Jackett配置是否正确。如果列表有内容但搜索时无法使用，请点击"重新加载索引器到搜索系统"按钮。',
                     'class': 'mb-4'
-                },
-                'text': '重新加载索引器到搜索系统',
-                'events': [
-                    {
-                        'name': 'click',
-                        'value': 'this.$axios.get("/api/v1/plugin/jackett/reload").then(res => { if(res.data.code === 0) { this.$toast.success(res.data.message); } else { this.$toast.error(res.data.message); } })'
-                    }
-                ]
+                }
             },
             {
                 'component': 'VCard',
@@ -484,12 +562,34 @@ class Jackett(_PluginBase):
                         'text': '索引器列表'
                     },
                     {
+                        'component': 'VCardText',
+                        'content': [
+                            {
+                                'component': 'VAlert',
+                                'props': {
+                                    'type': 'info',
+                                    'class': 'mb-4',
+                                    'model': 'indexerStatus',
+                                    'outlined': True,
+                                    'border': 'left'
+                                },
+                                'text': '索引器状态: {{indexerStatus}}',
+                                'events': [
+                                    {
+                                        'name': 'mounted',
+                                        'value': 'this.checkIndexerStatus()'
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
                         'component': 'VDataTable',
                         'props': {
                             'headers': [
                                 {'text': 'ID', 'value': 'id'},
                                 {'text': '索引器名称', 'value': 'name'},
-                                {'text': '类型', 'value': 'type'}
+                                {'text': '状态', 'value': 'status'}
                             ],
                             'items': [],
                             'loading': False,
@@ -501,11 +601,119 @@ class Jackett(_PluginBase):
                         'events': [
                             {
                                 'name': 'mounted',
-                                'value': 'this.get_indexers().then(res => { if(res.code === 0) { this.items = res.data.map(item => ({ id: item.value, name: item.text, type: "Jackett" })); } })'
+                                'value': 'this.loadIndexers()'
                             }
                         ]
                     }
                 ]
+            },
+            {
+                'component': 'VScript',
+                'content': '''
+                    export default {
+                        data() {
+                            return {
+                                items: [],
+                                loading: false,
+                                systemIndexers: [],
+                                indexerStatus: "未知"
+                            }
+                        },
+                        methods: {
+                            // 刷新Jackett索引器列表
+                            refreshIndexers() {
+                                this.loading = true;
+                                this.$axios.get("/api/v1/plugin/jackett/indexers")
+                                    .then(res => {
+                                        if (res.data.code === 0) {
+                                            this.items = res.data.data.map(item => ({
+                                                id: item.value,
+                                                name: item.text,
+                                                status: this.getIndexerStatus(item.value)
+                                            }));
+                                            
+                                            // 更新系统索引器列表
+                                            if (res.data.system_indexers) {
+                                                this.systemIndexers = res.data.system_indexers;
+                                                this.updateIndexerStatus();
+                                            }
+                                            
+                                            this.$toast.success("索引器列表刷新成功");
+                                        } else {
+                                            this.$toast.error(res.data.message || "获取索引器列表失败");
+                                        }
+                                    })
+                                    .catch(err => {
+                                        this.$toast.error("获取索引器列表异常: " + err);
+                                    })
+                                    .finally(() => {
+                                        this.loading = false;
+                                    });
+                            },
+                            
+                            // 重新加载索引器到搜索系统
+                            reloadIndexers() {
+                                this.loading = true;
+                                this.$axios.get("/api/v1/plugin/jackett/reload")
+                                    .then(res => {
+                                        if (res.data.code === 0) {
+                                            this.$toast.success(res.data.message);
+                                            // 重新加载索引器列表
+                                            this.refreshIndexers();
+                                        } else {
+                                            this.$toast.error(res.data.message);
+                                        }
+                                    })
+                                    .catch(err => {
+                                        this.$toast.error("重新加载索引器异常: " + err);
+                                    })
+                                    .finally(() => {
+                                        this.loading = false;
+                                    });
+                            },
+                            
+                            // 加载索引器列表
+                            loadIndexers() {
+                                this.refreshIndexers();
+                            },
+                            
+                            // 检查索引器状态
+                            checkIndexerStatus() {
+                                this.$axios.get("/api/v1/plugin/jackett/indexers")
+                                    .then(res => {
+                                        if (res.data.code === 0) {
+                                            if (res.data.system_indexers) {
+                                                this.systemIndexers = res.data.system_indexers;
+                                                this.updateIndexerStatus();
+                                            } else {
+                                                this.indexerStatus = "无法获取索引器状态信息";
+                                            }
+                                        } else {
+                                            this.indexerStatus = "获取索引器状态失败: " + (res.data.message || "未知错误");
+                                        }
+                                    })
+                                    .catch(err => {
+                                        this.indexerStatus = "检查索引器状态异常: " + err;
+                                    });
+                            },
+                            
+                            // 更新索引器状态信息
+                            updateIndexerStatus() {
+                                if (this.systemIndexers && this.systemIndexers.length > 0) {
+                                    this.indexerStatus = `系统中已添加 ${this.systemIndexers.length} 个 Jackett 索引器`;
+                                } else {
+                                    this.indexerStatus = "系统中暂无 Jackett 索引器，请点击"重新加载索引器到搜索系统"按钮";
+                                }
+                            },
+                            
+                            // 获取单个索引器状态
+                            getIndexerStatus(indexerId) {
+                                const domainId = "jackett_" + indexerId.toLowerCase();
+                                return this.systemIndexers.includes(domainId) ? "已添加" : "未添加";
+                            }
+                        }
+                    }
+                '''
             }
         ]
 
@@ -540,9 +748,38 @@ class Jackett(_PluginBase):
             return {"code": 1, "message": "请先配置Jackett地址和API Key"}
             
         try:
+            # 先清理已有索引器
+            self._remove_jackett_indexers()
+            # 重新加载
             self._add_jackett_indexers()
-            return {"code": 0, "message": f"重新加载索引器成功，共添加{len(self._added_indexers)}个索引器"}
+            
+            # 检查是否成功添加
+            try:
+                from app.helper.sites import SitesHelper
+                sites_helper = SitesHelper()
+                
+                # 获取系统中的索引器
+                all_sites = []
+                if hasattr(sites_helper, "get_indexers"):
+                    all_sites = sites_helper.get_indexers() or []
+                elif hasattr(sites_helper, "get_all_indexers"):
+                    all_sites = sites_helper.get_all_indexers() or []
+                
+                # 检查Jackett索引器是否在列表中
+                jackett_sites = [s for s in all_sites if s.startswith("jackett_")]
+                
+                if jackett_sites:
+                    print(f"【{self.plugin_name}】成功添加 {len(jackett_sites)} 个Jackett索引器: {jackett_sites}")
+                    return {"code": 0, "message": f"重新加载索引器成功，共添加{len(jackett_sites)}个索引器"}
+                else:
+                    print(f"【{self.plugin_name}】系统中未检测到Jackett索引器，可能添加失败")
+                    return {"code": 1, "message": "索引器添加失败，请检查日志"}
+            except Exception as e:
+                print(f"【{self.plugin_name}】检查索引器状态异常: {str(e)}")
+                return {"code": 0, "message": f"重新加载索引器成功，共添加{len(self._added_indexers)}个索引器，但无法验证状态"}
+                
         except Exception as e:
+            print(f"【{self.plugin_name}】重新加载索引器异常: {str(e)}")
             return {"code": 1, "message": f"重新加载索引器失败: {str(e)}"}
 
     def get_indexers(self):
@@ -554,10 +791,12 @@ class Jackett(_PluginBase):
             return {"code": 1, "message": "请先配置Jackett地址和API Key"}
         
         try:
+            # 获取Jackett索引器
             indexers = self._fetch_jackett_indexers()
             if not indexers:
                 return {"code": 1, "message": "未获取到Jackett索引器"}
             
+            # 格式化为选项列表
             formatted_indexers = []
             for indexer in indexers:
                 formatted_indexers.append({
@@ -565,8 +804,38 @@ class Jackett(_PluginBase):
                     "text": indexer.get("name")
                 })
             
-            return {"code": 0, "data": formatted_indexers}
+            # 检查系统中已添加的索引器
+            try:
+                from app.helper.sites import SitesHelper
+                sites_helper = SitesHelper()
+                
+                # 获取系统中的索引器
+                all_sites = []
+                if hasattr(sites_helper, "get_indexers"):
+                    all_sites = sites_helper.get_indexers() or []
+                elif hasattr(sites_helper, "get_all_indexers"):
+                    all_sites = sites_helper.get_all_indexers() or []
+                
+                # 检查Jackett索引器是否在列表中
+                jackett_sites = [s for s in all_sites if s.startswith("jackett_")]
+                
+                print(f"【{self.plugin_name}】系统中共有 {len(jackett_sites)} 个Jackett索引器: {jackett_sites}")
+                print(f"【{self.plugin_name}】Jackett服务中共有 {len(formatted_indexers)} 个索引器")
+                
+                # 添加额外信息
+                return {
+                    "code": 0, 
+                    "data": formatted_indexers,
+                    "system_indexers": jackett_sites,
+                    "indexer_count": len(jackett_sites)
+                }
+                
+            except Exception as e:
+                print(f"【{self.plugin_name}】获取系统索引器异常: {str(e)}")
+                return {"code": 0, "data": formatted_indexers}
+                
         except Exception as e:
+            print(f"【{self.plugin_name}】获取索引器异常: {str(e)}")
             return {"code": 1, "message": f"获取索引器异常: {str(e)}"}
 
     def get_state(self) -> bool:
