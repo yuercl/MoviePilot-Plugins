@@ -18,7 +18,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.11"
+    plugin_version = "1.12"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -183,14 +183,36 @@ class Jackett(_PluginBase):
         try:
             # 设置请求头
             headers = {
-                "Accept": "application/json",
-                "X-Api-Key": self._api_key
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "User-Agent": "MoviePilot/1.0",
+                "X-Api-Key": self._api_key,
+                "Accept": "application/json, text/javascript, */*; q=0.01"
             }
             
-            # 创建会话
-            if not self._session:
-                print(f"【{self.plugin_name}】初始化会话...")
-                self._session = {}
+            print(f"【{self.plugin_name}】请求头: {headers}")
+            
+            # 创建会话并获取Cookie
+            session = RequestUtils().session
+            dashboard_url = f"{self._host}/UI/Dashboard"
+            print(f"【{self.plugin_name}】尝试访问Dashboard获取Cookie: {dashboard_url}")
+            
+            # 如果设置了密码，则进行认证
+            if self._password:
+                auth_data = {"password": self._password}
+                auth_params = {"password": self._password}
+                dashboard_res = RequestUtils(
+                    headers=headers,
+                    session=session
+                ).post_res(
+                    url=dashboard_url,
+                    data=auth_data,
+                    params=auth_params
+                )
+                if dashboard_res and session.cookies:
+                    self._cookies = session.cookies.get_dict()
+                    print(f"【{self.plugin_name}】成功获取Cookie: {self._cookies}")
+                else:
+                    print(f"【{self.plugin_name}】获取Cookie失败")
             
             # 重置重试计数
             current_try = 1
@@ -199,48 +221,43 @@ class Jackett(_PluginBase):
             while current_try <= max_retries:
                 try:
                     # 使用正确的API路径
-                    indexer_query_url = f"{self._host}/api/v2.0/indexers/all"
+                    indexer_query_url = f"{self._host}/api/v2.0/indexers?configured=true"
                     print(f"【{self.plugin_name}】请求索引器列表 (第{current_try}次尝试): {indexer_query_url}")
                     
+                    # 请求API
                     response = RequestUtils(
                         headers=headers,
                         cookies=self._cookies,
-                        timeout=30
+                        timeout=30,
+                        verify=False
                     ).get_res(indexer_query_url)
                     
                     if response:
                         print(f"【{self.plugin_name}】收到响应: HTTP {response.status_code}")
+                        print(f"【{self.plugin_name}】响应头: {dict(response.headers)}")
                         
                         if response.status_code == 200:
                             try:
-                                # 打印响应内容前几百个字符以便调试
-                                print(f"【{self.plugin_name}】响应内容预览: {response.text[:200]}...")
+                                # 检查响应是否为有效的JSON
+                                if not RequestUtils.check_response_is_valid_json(response):
+                                    print(f"【{self.plugin_name}】响应不是有效的JSON格式")
+                                    if current_try < max_retries:
+                                        print(f"【{self.plugin_name}】{retry_interval}秒后进行第{current_try + 1}次重试...")
+                                        time.sleep(retry_interval)
+                                        current_try += 1
+                                        continue
+                                    break
                                 
                                 indexers = response.json()
                                 if indexers and isinstance(indexers, list):
-                                    # 过滤已配置的索引器
-                                    configured_indexers = [idx for idx in indexers if idx.get("configured", False)]
-                                    print(f"【{self.plugin_name}】成功获取到{len(configured_indexers)}个已配置的索引器")
-                                    
-                                    # 验证索引器数据的完整性
-                                    valid_indexers = []
-                                    for indexer in configured_indexers:
-                                        if not indexer.get("id") or not indexer.get("name"):
-                                            print(f"【{self.plugin_name}】跳过无效的索引器数据: {indexer}")
-                                            continue
-                                        valid_indexers.append(indexer)
-                                    
-                                    if valid_indexers:
-                                        print(f"【{self.plugin_name}】验证后保留{len(valid_indexers)}个有效索引器")
-                                        return valid_indexers
-                                    else:
-                                        print(f"【{self.plugin_name}】未找到有效的索引器数据")
+                                    print(f"【{self.plugin_name}】成功获取到{len(indexers)}个索引器")
+                                    return indexers
                                 else:
                                     print(f"【{self.plugin_name}】解析索引器列表失败: 无效的JSON响应")
                             except Exception as e:
                                 print(f"【{self.plugin_name}】解析索引器列表JSON异常: {str(e)}")
                                 if response and hasattr(response, 'text'):
-                                    print(f"【{self.plugin_name}】响应内容: {response.text[:200]}...")
+                                    print(f"【{self.plugin_name}】响应内容: {response.text[:500]}...")
                         elif response.status_code == 401:
                             print(f"【{self.plugin_name}】认证失败，请检查API Key是否正确")
                             break
