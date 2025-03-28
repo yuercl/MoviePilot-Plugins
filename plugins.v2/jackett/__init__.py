@@ -19,7 +19,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.30"
+    plugin_version = "1.31"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -191,13 +191,21 @@ class Jackett(_PluginBase):
                     sites = sites_helper.get_all_indexers()
                 
                 if sites:
-                    jackett_sites = [s for s in sites if s.startswith("jackett_")]
+                    # 检查sites是列表还是字典，并相应地处理
+                    if isinstance(sites, dict):
+                        jackett_sites = [s for s in sites.keys() if isinstance(s, str) and s.startswith("jackett_")]
+                    else:
+                        jackett_sites = [s for s in sites if isinstance(s, str) and s.startswith("jackett_")]
+                    
                     print(f"【{self.plugin_name}】系统当前共有 {len(jackett_sites)} 个 Jackett 索引器: {jackett_sites}")
                 else:
                     print(f"【{self.plugin_name}】无法获取系统索引器列表")
                 
             except Exception as e:
                 print(f"【{self.plugin_name}】尝试刷新索引器异常: {str(e)}")
+                # 打印异常的详细堆栈信息，帮助调试
+                import traceback
+                print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
             
         except Exception as e:
             print(f"【{self.plugin_name}】添加Jackett索引器异常: {str(e)}")
@@ -327,15 +335,18 @@ class Jackett(_PluginBase):
             indexer_id = jackett_indexer.get("id", "")
             indexer_name = jackett_indexer.get("name", "")
             
-            # 基本配置 - 使用更简单的结构
+            # 基本配置 - 使用更符合MoviePilot要求的结构
             mp_indexer = {
                 "id": f"jackett_{indexer_id.lower()}",
                 "name": f"[Jackett] {indexer_name}",
                 "domain": self._host,
+                "url": self._host,  # 添加url字段
                 "encoding": "UTF-8",
-                "public": True,
+                "public": True,  # 设置为公共索引器
                 "proxy": False,
+                "language": "zh_CN",  # 添加语言设置
                 "site": "http://127.0.0.1/", # 添加一个虚拟站点地址
+                "builtin": True,  # 设置为内置索引器
                 "category": {
                     "movie": [
                         {
@@ -796,7 +807,11 @@ class Jackett(_PluginBase):
                     all_sites = sites_helper.get_all_indexers() or []
                 
                 # 检查Jackett索引器是否在列表中
-                jackett_sites = [s for s in all_sites if s.startswith("jackett_")]
+                jackett_sites = []
+                if isinstance(all_sites, dict):
+                    jackett_sites = [s for s in all_sites.keys() if isinstance(s, str) and s.startswith("jackett_")]
+                else:
+                    jackett_sites = [s for s in all_sites if isinstance(s, str) and s.startswith("jackett_")]
                 
                 if jackett_sites:
                     print(f"【{self.plugin_name}】成功添加 {len(jackett_sites)} 个Jackett索引器: {jackett_sites}")
@@ -806,6 +821,8 @@ class Jackett(_PluginBase):
                     return {"code": 1, "message": "索引器添加失败，请检查日志"}
             except Exception as e:
                 print(f"【{self.plugin_name}】检查索引器状态异常: {str(e)}")
+                import traceback
+                print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
                 return {"code": 0, "message": f"重新加载索引器成功，共添加{len(self._added_indexers)}个索引器，但无法验证状态"}
                 
         except Exception as e:
@@ -862,8 +879,12 @@ class Jackett(_PluginBase):
                 elif hasattr(sites_helper, "get_all_indexers"):
                     all_sites = sites_helper.get_all_indexers() or []
                 
-                # 检查Jackett索引器是否在列表中
-                jackett_sites = [s for s in all_sites if s.startswith("jackett_")]
+                # 检查all_sites的类型并处理
+                jackett_sites = []
+                if isinstance(all_sites, dict):
+                    jackett_sites = [s for s in all_sites.keys() if isinstance(s, str) and s.startswith("jackett_")]
+                else:
+                    jackett_sites = [s for s in all_sites if isinstance(s, str) and s.startswith("jackett_")]
                 
                 print(f"【{self.plugin_name}】系统中共有 {len(jackett_sites)} 个Jackett索引器: {jackett_sites}")
                 print(f"【{self.plugin_name}】Jackett服务中共有 {len(formatted_indexers)} 个索引器")
@@ -878,6 +899,8 @@ class Jackett(_PluginBase):
                 
             except Exception as e:
                 print(f"【{self.plugin_name}】获取系统索引器异常: {str(e)}")
+                import traceback
+                print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
                 return {"code": 0, "data": formatted_indexers}
                 
         except Exception as e:
@@ -922,13 +945,40 @@ class Jackett(_PluginBase):
             # 移除已添加的索引器
             removed_count = 0
             
-            for domain in self._added_indexers:
+            # 检查SitesHelper是否有remove_indexer方法
+            if hasattr(sites_helper, "remove_indexer"):
+                for domain in self._added_indexers:
+                    try:
+                        sites_helper.remove_indexer(domain=domain)
+                        removed_count += 1
+                        print(f"【{self.plugin_name}】成功移除索引器: {domain}")
+                    except Exception as e:
+                        print(f"【{self.plugin_name}】移除索引器失败: {domain} - {str(e)}")
+            else:
+                # 尝试替代方法移除索引器
                 try:
-                    sites_helper.remove_indexer(domain=domain)
-                    removed_count += 1
-                    print(f"【{self.plugin_name}】成功移除索引器: {domain}")
+                    print(f"【{self.plugin_name}】SitesHelper没有remove_indexer方法，尝试使用替代方式移除")
+                    # 检查其他可能的方法
+                    if hasattr(sites_helper, "delete_indexer"):
+                        for domain in self._added_indexers:
+                            try:
+                                sites_helper.delete_indexer(domain=domain)
+                                removed_count += 1
+                                print(f"【{self.plugin_name}】使用delete_indexer成功移除索引器: {domain}")
+                            except Exception as e:
+                                print(f"【{self.plugin_name}】使用delete_indexer移除索引器失败: {domain} - {str(e)}")
+                    elif hasattr(sites_helper, "__remove_indexer"):
+                        for domain in self._added_indexers:
+                            try:
+                                sites_helper.__remove_indexer(domain=domain)
+                                removed_count += 1
+                                print(f"【{self.plugin_name}】使用__remove_indexer成功移除索引器: {domain}")
+                            except Exception as e:
+                                print(f"【{self.plugin_name}】使用__remove_indexer移除索引器失败: {domain} - {str(e)}")
+                    else:
+                        print(f"【{self.plugin_name}】没有找到可用的移除索引器方法，将只清空内部列表")
                 except Exception as e:
-                    print(f"【{self.plugin_name}】移除索引器失败: {domain} - {str(e)}")
+                    print(f"【{self.plugin_name}】尝试替代方式移除索引器异常: {str(e)}")
                     
             # 清空已添加索引器列表
             self._added_indexers = []
@@ -936,6 +986,8 @@ class Jackett(_PluginBase):
             
         except Exception as e:
             print(f"【{self.plugin_name}】移除Jackett索引器异常: {str(e)}")
+            import traceback
+            print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
 
     def stop_service(self) -> None:
         """
