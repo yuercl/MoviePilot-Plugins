@@ -18,7 +18,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.08"
+    plugin_version = "1.10"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -340,7 +340,8 @@ class Jackett(_PluginBase):
                     "apikey": self._api_key,
                     "t": "search",
                     "q": "{keyword}",
-                    "cat": "{categories}"  # 支持分类搜索
+                    "cat": "{categories}",  # 支持分类搜索
+                    "extended": "1"  # 启用扩展搜索
                 }
             }
             
