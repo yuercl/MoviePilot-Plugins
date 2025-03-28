@@ -19,7 +19,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.40"
+    plugin_version = "1.45"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -64,10 +64,15 @@ class Jackett(_PluginBase):
         
         print(f"【{self.plugin_name}】插件初始化完成，状态: {self._enabled}")
         
-        # 如果插件已启用且配置了API信息，则添加索引器
-        if self._enabled and self._host and self._api_key:
+        # 如果配置了API信息，则尝试添加索引器，即使插件未启用
+        if self._host and self._api_key:
             print(f"【{self.plugin_name}】尝试添加Jackett索引器...")
-            self._add_jackett_indexers()
+            try:
+                self._add_jackett_indexers()
+            except Exception as e:
+                print(f"【{self.plugin_name}】添加索引器异常: {str(e)}")
+                import traceback
+                print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
 
     def _add_jackett_indexers(self):
         """
@@ -196,6 +201,59 @@ class Jackett(_PluginBase):
             try:
                 # 尝试多种可能的刷新/初始化方法
                 print(f"【{self.plugin_name}】尝试多种方法激活索引器...")
+                
+                # 尝试直接写入系统配置
+                try:
+                    from app.db.systemconfig_oper import SystemConfigOper
+                    from app.schemas.types import SystemConfigKey
+                    
+                    print(f"【{self.plugin_name}】尝试直接写入系统配置...")
+                    
+                    # 获取当前索引器配置
+                    config_oper = SystemConfigOper()
+                    indexers_config = config_oper.get(SystemConfigKey.UserIndexer) or {}
+                    
+                    print(f"【{self.plugin_name}】当前系统索引器配置: {len(indexers_config)} 个索引器")
+                    
+                    # 将新索引器添加到配置中
+                    indexer_count = 0
+                    for domain in self._added_indexers:
+                        # 获取索引器配置
+                        indexer_info = None
+                        for indexer in indexers:
+                            formatted = self._format_indexer(indexer)
+                            if formatted and formatted.get("id", "").lower() == domain.lower():
+                                indexer_info = formatted
+                                break
+                        
+                        if indexer_info:
+                            # 添加到配置中
+                            indexers_config[domain] = indexer_info
+                            indexer_count += 1
+                            print(f"【{self.plugin_name}】直接添加索引器到系统配置: {domain}")
+                    
+                    # 保存配置
+                    if indexer_count > 0:
+                        config_oper.set(SystemConfigKey.UserIndexer, indexers_config)
+                        print(f"【{self.plugin_name}】成功保存 {indexer_count} 个索引器到系统配置")
+                    
+                    # 尝试触发配置重载
+                    try:
+                        # 尝试发送模块重载事件
+                        from app.helper.event import EventManager
+                        from app.schemas.types import EventType
+                        
+                        print(f"【{self.plugin_name}】尝试发送模块重载事件...")
+                        event_manager = EventManager()
+                        event_manager.send_event(EventType.ModuleReload)
+                        print(f"【{self.plugin_name}】模块重载事件已发送")
+                    except Exception as e:
+                        print(f"【{self.plugin_name}】发送模块重载事件失败: {str(e)}")
+                        
+                except Exception as e:
+                    print(f"【{self.plugin_name}】直接写入系统配置失败: {str(e)}")
+                    import traceback
+                    print(f"【{self.plugin_name}】写入配置异常详情: {traceback.format_exc()}")
                 
                 # 检查是否有 refresh_indexer 方法
                 if hasattr(sites_helper, "refresh_indexer"):
@@ -399,34 +457,15 @@ class Jackett(_PluginBase):
             indexer_id = jackett_indexer.get("id", "")
             indexer_name = jackett_indexer.get("name", "")
             
-            # 基本配置 - 使用更符合MoviePilot要求的结构
+            # 使用极简格式，只保留必要字段
             mp_indexer = {
                 "id": f"jackett_{indexer_id.lower()}",
                 "name": f"[Jackett] {indexer_name}",
                 "domain": self._host,
                 "url": self._host,
                 "encoding": "UTF-8",
-                "public": False,  # 修改为私有索引器更容易被识别
-                "proxy": True,    # 启用代理选项
-                "language": "zh_CN",
-                "site": f"{self._host}/UI/Dashboard",  # 使用正确的站点地址
-                "builtin": False,  # 设置为非内置索引器
-                "category": {
-                    "movie": [
-                        {
-                            "id": "2000",
-                            "cat": "Movies",
-                            "desc": "Movies"
-                        }
-                    ],
-                    "tv": [
-                        {
-                            "id": "5000",
-                            "cat": "TV",
-                            "desc": "TV"
-                        }
-                    ]
-                },
+                "public": True,
+                "proxy": True,
                 "search": {
                     "paths": [
                         {
@@ -437,12 +476,9 @@ class Jackett(_PluginBase):
                     "params": {
                         "t": "search",
                         "q": "{keyword}",
-                        "cat": "2000,5000",
                         "apikey": self._api_key
                     }
                 },
-                "result_num": 100,  # 添加结果数量限制
-                "timeout": 30,      # 添加超时设置
                 "torrents": {
                     "list": {
                         "selector": "item"
@@ -454,17 +490,11 @@ class Jackett(_PluginBase):
                         "title": {
                             "selector": "title"
                         },
-                        "details": {
-                            "selector": "guid"
-                        },
                         "download": {
                             "selector": "link"
                         },
                         "size": {
                             "selector": "size"
-                        },
-                        "date_added": {
-                            "selector": "pubDate"
                         },
                         "seeders": {
                             "selector": "torznab|attr[name=seeders]",
@@ -473,16 +503,6 @@ class Jackett(_PluginBase):
                         "leechers": {
                             "selector": "torznab|attr[name=peers]",
                             "default": "0"
-                        },
-                        "downloadvolumefactor": {
-                            "case": {
-                                "*": 0
-                            }
-                        },
-                        "uploadvolumefactor": {
-                            "case": {
-                                "*": 1
-                            }
                         }
                     }
                 }
@@ -842,12 +862,68 @@ class Jackett(_PluginBase):
             return {"code": 1, "message": "请先配置Jackett地址和API Key"}
             
         try:
+            # 强制启用插件功能
+            self._enabled = True
+            
             # 先清理已有索引器
             self._remove_jackett_indexers()
+            
+            # 清空已添加索引器列表
+            self._added_indexers = []
+            
             # 重新加载
             self._add_jackett_indexers()
             
-            # 检查是否成功添加
+            # 尝试直接写入系统配置
+            try:
+                from app.db.systemconfig_oper import SystemConfigOper
+                from app.schemas.types import SystemConfigKey
+                
+                # 获取当前索引器配置
+                config_oper = SystemConfigOper()
+                indexers_config = config_oper.get(SystemConfigKey.UserIndexer) or {}
+                
+                print(f"【{self.plugin_name}】当前系统索引器配置: {len(indexers_config)} 个索引器")
+                
+                # 直接获取所有已格式化的索引器
+                all_indexers = []
+                jackett_indexers = self._fetch_jackett_indexers()
+                for indexer in jackett_indexers:
+                    formatted = self._format_indexer(indexer)
+                    if formatted:
+                        all_indexers.append((formatted["id"], formatted))
+                
+                # 清除已有的Jackett索引器
+                jackett_keys = [k for k in indexers_config.keys() if k.startswith("jackett_")]
+                for key in jackett_keys:
+                    if key in indexers_config:
+                        del indexers_config[key]
+                
+                # 添加所有新格式化的Jackett索引器
+                for indexer_id, indexer_config in all_indexers:
+                    indexers_config[indexer_id] = indexer_config
+                
+                # 保存配置
+                config_oper.set(SystemConfigKey.UserIndexer, indexers_config)
+                print(f"【{self.plugin_name}】成功直接写入 {len(all_indexers)} 个索引器到系统配置")
+                
+                # 尝试发送刷新事件
+                try:
+                    from app.helper.event import EventManager
+                    from app.schemas.types import EventType
+                    EventManager().send_event(EventType.ModuleReload)
+                    print(f"【{self.plugin_name}】成功发送模块重载事件")
+                except Exception as e:
+                    print(f"【{self.plugin_name}】发送刷新事件失败: {str(e)}")
+                
+                return {"code": 0, "message": f"重新加载索引器成功，共添加{len(all_indexers)}个索引器"}
+                
+            except Exception as e:
+                print(f"【{self.plugin_name}】直接写入系统配置失败: {str(e)}")
+                import traceback
+                print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
+            
+            # 如果直接写入失败，回退到检查添加结果
             try:
                 # 导入 SitesHelper
                 sites_helper = None
@@ -862,11 +938,11 @@ class Jackett(_PluginBase):
                         sites_helper = SitesHelper()
                     except ImportError as e:
                         print(f"【{self.plugin_name}】导入SitesHelper失败: {str(e)}")
-                        return {"code": 0, "message": f"重新加载索引器成功，但无法验证状态"}
+                        return {"code": 0, "message": f"重新加载索引器成功，共添加{len(self._added_indexers)}个索引器，但无法验证状态"}
                 
                 if not sites_helper:
                     print(f"【{self.plugin_name}】无法创建SitesHelper实例")
-                    return {"code": 0, "message": f"重新加载索引器成功，但无法验证状态"}
+                    return {"code": 0, "message": f"重新加载索引器成功，共添加{len(self._added_indexers)}个索引器，但无法验证状态"}
                 
                 # 获取系统中的索引器
                 all_sites = []
