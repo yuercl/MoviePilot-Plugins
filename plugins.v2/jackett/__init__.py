@@ -183,10 +183,10 @@ class Jackett(_PluginBase):
         try:
             # 设置请求头
             headers = {
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "Content-Type": "application/json",
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36",
                 "X-Api-Key": self._api_key,
-                "Accept": "application/json, text/javascript, */*; q=0.01"
+                "Accept": "application/json"
             }
             
             # 创建会话
@@ -207,8 +207,7 @@ class Jackett(_PluginBase):
                             timeout=30
                         ).post_res(
                             url=login_url, 
-                            data=login_data,
-                            params={"password": self._password}
+                            data=login_data
                         )
                         
                         if login_response and login_response.status_code == 200:
@@ -236,7 +235,8 @@ class Jackett(_PluginBase):
             # 获取索引器列表 - 添加重试机制
             while current_try <= max_retries:
                 try:
-                    indexer_query_url = f"{self._host}/api/v2.0/indexers?configured=true"
+                    # 修改API路径
+                    indexer_query_url = f"{self._host}/api/v2.0/indexers/all"
                     print(f"【{self.plugin_name}】请求索引器列表 (第{current_try}次尝试): {indexer_query_url}")
                     
                     response = RequestUtils(
@@ -250,13 +250,18 @@ class Jackett(_PluginBase):
                         
                         if response.status_code == 200:
                             try:
+                                # 打印响应内容前几百个字符以便调试
+                                print(f"【{self.plugin_name}】响应内容预览: {response.text[:200]}...")
+                                
                                 indexers = response.json()
                                 if indexers and isinstance(indexers, list):
-                                    print(f"【{self.plugin_name}】成功获取到{len(indexers)}个索引器")
+                                    # 过滤已配置的索引器
+                                    configured_indexers = [idx for idx in indexers if idx.get("configured", False)]
+                                    print(f"【{self.plugin_name}】成功获取到{len(configured_indexers)}个已配置的索引器")
                                     
                                     # 验证索引器数据的完整性
                                     valid_indexers = []
-                                    for indexer in indexers:
+                                    for indexer in configured_indexers:
                                         if not indexer.get("id") or not indexer.get("name"):
                                             print(f"【{self.plugin_name}】跳过无效的索引器数据: {indexer}")
                                             continue
