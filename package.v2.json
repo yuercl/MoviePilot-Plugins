@@ -22,7 +22,7 @@
   "JackettV2": {
     "name": "JackettV2",
     "description": "支持 Jackett 搜索器，将Jackett索引器添加到MoviePilot V2内建搜索器中。",
-    "version": "1.1",
+    "version": "1.2",
     "icon": "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico",
     "author": "lightolly",
     "level": 2,
@@ -33,6 +33,7 @@
       "version": ">=2.0.0"
     },
     "history": {
+      "1.2": "移除事件系统依赖，改用服务类直接刷新，增加多重刷新机制",
       "1.1": "修复索引器刷新问题，增加多种刷新机制",
       "1.0": "完成基础功能，支持Jackett索引器导入"
     }

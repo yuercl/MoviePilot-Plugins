@@ -19,7 +19,7 @@ class JackettV2(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.1"
+    plugin_version = "1.2"
     # 插件作者
     plugin_author = "lightolly"
     # 作者主页
@@ -408,33 +408,66 @@ class JackettV2(_PluginBase):
                 # 尝试使用refresh_indexer方法
                 if hasattr(sites_helper, 'refresh_indexer'):
                     sites_helper.refresh_indexer()
+                    print(f"【{self.plugin_name}】使用refresh_indexer方法刷新成功")
                 # 尝试使用refresh方法
                 elif hasattr(sites_helper, 'refresh'):
                     sites_helper.refresh()
+                    print(f"【{self.plugin_name}】使用refresh方法刷新成功")
                 # 尝试使用init_indexer方法
                 elif hasattr(sites_helper, 'init_indexer'):
                     sites_helper.init_indexer()
+                    print(f"【{self.plugin_name}】使用init_indexer方法刷新成功")
                 # 尝试直接修改配置文件时间戳来触发重载
                 else:
                     import os
                     config_file = "/config/sites.json"
                     if os.path.exists(config_file):
                         os.utime(config_file, None)
-                    print(f"【{self.plugin_name}】已更新配置文件时间戳以触发重载")
+                        print(f"【{self.plugin_name}】已更新配置文件时间戳以触发重载")
+                    
+                    # 尝试修改数据库文件时间戳
+                    db_file = "/config/user.db"
+                    if os.path.exists(db_file):
+                        os.utime(db_file, None)
+                        print(f"【{self.plugin_name}】已更新数据库文件时间戳以触发重载")
             except Exception as e:
                 print(f"【{self.plugin_name}】刷新索引器失败: {str(e)}")
                 
-            # 尝试通过事件服务刷新站点
+            # 尝试通过服务类刷新站点
             try:
-                from app.helper.event import EventManager
-                event_manager = EventManager()
-                event_manager.send_event('RefreshSites', {})
-                print(f"【{self.plugin_name}】已发送刷新站点事件")
+                # 尝试导入并使用IndexerService
+                try:
+                    from app.modules.indexer import IndexerService
+                    indexer_service = IndexerService()
+                    if hasattr(indexer_service, 'init'):
+                        indexer_service.init()
+                        print(f"【{self.plugin_name}】使用IndexerService.init方法刷新成功")
+                    elif hasattr(indexer_service, 'refresh'):
+                        indexer_service.refresh()
+                        print(f"【{self.plugin_name}】使用IndexerService.refresh方法刷新成功")
+                except Exception as e:
+                    print(f"【{self.plugin_name}】使用IndexerService刷新失败: {str(e)}")
+                
+                # 尝试导入并使用SitesService
+                try:
+                    from app.modules.sites import SitesService
+                    sites_service = SitesService()
+                    if hasattr(sites_service, 'init'):
+                        sites_service.init()
+                        print(f"【{self.plugin_name}】使用SitesService.init方法刷新成功")
+                    elif hasattr(sites_service, 'refresh'):
+                        sites_service.refresh()
+                        print(f"【{self.plugin_name}】使用SitesService.refresh方法刷新成功")
+                except Exception as e:
+                    print(f"【{self.plugin_name}】使用SitesService刷新失败: {str(e)}")
+                
             except Exception as e:
-                print(f"【{self.plugin_name}】发送刷新事件失败: {str(e)}")
+                print(f"【{self.plugin_name}】尝试使用服务类刷新失败: {str(e)}")
             
         except Exception as e:
             print(f"【{self.plugin_name}】添加Jackett索引器异常: {str(e)}")
+            import traceback
+            print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
 
     def _remove_jackett_indexers(self):
         """
