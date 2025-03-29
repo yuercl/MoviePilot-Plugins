@@ -19,7 +19,7 @@ class JackettV2(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.0"
+    plugin_version = "1.1"
     # 插件作者
     plugin_author = "lightolly"
     # 作者主页
@@ -403,8 +403,35 @@ class JackettV2(_PluginBase):
             
             print(f"【{self.plugin_name}】共添加了{len(self._added_indexers)}个索引器")
             
-            # 刷新索引器
-            sites_helper.init_indexer()
+            # 尝试不同的刷新方法
+            try:
+                # 尝试使用refresh_indexer方法
+                if hasattr(sites_helper, 'refresh_indexer'):
+                    sites_helper.refresh_indexer()
+                # 尝试使用refresh方法
+                elif hasattr(sites_helper, 'refresh'):
+                    sites_helper.refresh()
+                # 尝试使用init_indexer方法
+                elif hasattr(sites_helper, 'init_indexer'):
+                    sites_helper.init_indexer()
+                # 尝试直接修改配置文件时间戳来触发重载
+                else:
+                    import os
+                    config_file = "/config/sites.json"
+                    if os.path.exists(config_file):
+                        os.utime(config_file, None)
+                    print(f"【{self.plugin_name}】已更新配置文件时间戳以触发重载")
+            except Exception as e:
+                print(f"【{self.plugin_name}】刷新索引器失败: {str(e)}")
+                
+            # 尝试通过事件服务刷新站点
+            try:
+                from app.helper.event import EventManager
+                event_manager = EventManager()
+                event_manager.send_event('RefreshSites', {})
+                print(f"【{self.plugin_name}】已发送刷新站点事件")
+            except Exception as e:
+                print(f"【{self.plugin_name}】发送刷新事件失败: {str(e)}")
             
         except Exception as e:
             print(f"【{self.plugin_name}】添加Jackett索引器异常: {str(e)}")
