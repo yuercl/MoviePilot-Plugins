@@ -19,11 +19,11 @@ class JackettV2(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.4"
+    plugin_version = "1.5"
     # 插件作者
-    plugin_author = "lightolly"
+    plugin_author = "jason"
     # 作者主页
-    author_url = "https://github.com/lightolly"
+    author_url = "https://github.com/xj-bear"
     # 插件配置项ID前缀
     plugin_config_prefix = "jackettv2_"
     # 加载顺序
@@ -370,14 +370,63 @@ class JackettV2(_PluginBase):
                         sites_helper.delete_indexer(domain=domain)
                         removed_count += 1
                         print(f"【{self.plugin_name}】成功移除索引器: {domain}")
+                    # 尝试使用remove_indexer方法
+                    elif hasattr(sites_helper, 'remove_indexer'):
+                        sites_helper.remove_indexer(domain=domain)
+                        removed_count += 1
+                        print(f"【{self.plugin_name}】成功移除索引器: {domain}")
+                    # 尝试直接修改配置文件
                     else:
-                        print(f"【{self.plugin_name}】无法移除索引器: {domain} - 缺少delete_indexer方法")
+                        config_file = "/config/sites.json"
+                        if os.path.exists(config_file):
+                            try:
+                                with open(config_file, 'r', encoding='utf-8') as f:
+                                    sites_config = json.load(f)
+                                if domain in sites_config:
+                                    del sites_config[domain]
+                                    with open(config_file, 'w', encoding='utf-8') as f:
+                                        json.dump(sites_config, f, ensure_ascii=False, indent=2)
+                                    removed_count += 1
+                                    print(f"【{self.plugin_name}】通过配置文件移除索引器: {domain}")
+                            except Exception as e:
+                                print(f"【{self.plugin_name}】修改配置文件失败: {str(e)}")
                 except Exception as e:
                     print(f"【{self.plugin_name}】移除索引器失败: {domain} - {str(e)}")
                     
             # 清空已添加索引器列表
             self._added_indexers = []
             print(f"【{self.plugin_name}】共移除了 {removed_count} 个索引器")
+            
+            # 尝试刷新配置
+            try:
+                # 尝试使用refresh方法
+                if hasattr(sites_helper, 'refresh'):
+                    sites_helper.refresh()
+                    print(f"【{self.plugin_name}】使用refresh方法刷新成功")
+                    return
+                
+                # 尝试修改配置文件时间戳来触发重载
+                config_file = "/config/sites.json"
+                if os.path.exists(config_file):
+                    os.utime(config_file, None)
+                    print(f"【{self.plugin_name}】已更新配置文件时间戳以触发重载")
+                    
+                # 尝试修改数据库文件时间戳
+                db_file = "/config/user.db"
+                if os.path.exists(db_file):
+                    os.utime(db_file, None)
+                    print(f"【{self.plugin_name}】已更新数据库文件时间戳以触发重载")
+                    
+                # 尝试使用其他刷新方法
+                if hasattr(sites_helper, 'init_indexer'):
+                    sites_helper.init_indexer()
+                    print(f"【{self.plugin_name}】使用init_indexer方法刷新成功")
+                if hasattr(sites_helper, 'load'):
+                    sites_helper.load()
+                    print(f"【{self.plugin_name}】使用load方法刷新成功")
+                    
+            except Exception as e:
+                print(f"【{self.plugin_name}】刷新配置失败: {str(e)}")
             
         except Exception as e:
             print(f"【{self.plugin_name}】移除Jackett索引器异常: {str(e)}")
@@ -402,6 +451,9 @@ class JackettV2(_PluginBase):
             # 先移除已添加的索引器
             self._remove_jackett_indexers()
             
+            # 等待1秒确保删除操作完成
+            time.sleep(1)
+            
             # 清空已添加索引器列表
             self._added_indexers = []
             
@@ -417,6 +469,11 @@ class JackettV2(_PluginBase):
                 
                 domain = f"jackett_{indexer_id.lower()}"
                 
+                # 检查是否已经添加过
+                if domain in self._added_indexers:
+                    print(f"【{self.plugin_name}】索引器已存在，跳过: {indexer.get('name')}")
+                    continue
+                
                 # 格式化为MoviePilot支持的格式
                 mp_indexer = self._format_indexer(indexer)
                 if not mp_indexer:
@@ -431,6 +488,9 @@ class JackettV2(_PluginBase):
                     print(f"【{self.plugin_name}】添加索引器失败: {indexer.get('name')} - {str(e)}")
             
             print(f"【{self.plugin_name}】共添加了{len(self._added_indexers)}个索引器")
+            
+            # 等待1秒确保添加操作完成
+            time.sleep(1)
             
             # 尝试刷新索引器
             try:
@@ -452,12 +512,10 @@ class JackettV2(_PluginBase):
                     os.utime(db_file, None)
                     print(f"【{self.plugin_name}】已更新数据库文件时间戳以触发重载")
                     
-                # 尝试使用SitesHelper的其他方法
+                # 尝试使用其他刷新方法
                 if hasattr(sites_helper, 'init_indexer'):
                     sites_helper.init_indexer()
                     print(f"【{self.plugin_name}】使用init_indexer方法刷新成功")
-                    
-                # 尝试使用SitesHelper的load方法
                 if hasattr(sites_helper, 'load'):
                     sites_helper.load()
                     print(f"【{self.plugin_name}】使用load方法刷新成功")
