@@ -19,7 +19,7 @@ class JackettV2(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.2"
+    plugin_version = "1.3"
     # 插件作者
     plugin_author = "lightolly"
     # 作者主页
@@ -353,6 +353,35 @@ class JackettV2(_PluginBase):
             print(f"【{self.plugin_name}】格式化索引器失败: {str(e)}")
             return None
 
+    def _remove_jackett_indexers(self):
+        """
+        从MoviePilot V2中移除Jackett索引器
+        """
+        try:
+            from app.helper.sites import SitesHelper
+            sites_helper = SitesHelper()
+            
+            # 移除已添加的索引器
+            removed_count = 0
+            for domain in self._added_indexers:
+                try:
+                    # 尝试使用新的API删除索引器
+                    if hasattr(sites_helper, 'delete_indexer'):
+                        sites_helper.delete_indexer(domain=domain)
+                        removed_count += 1
+                        print(f"【{self.plugin_name}】成功移除索引器: {domain}")
+                    else:
+                        print(f"【{self.plugin_name}】无法移除索引器: {domain} - 缺少delete_indexer方法")
+                except Exception as e:
+                    print(f"【{self.plugin_name}】移除索引器失败: {domain} - {str(e)}")
+                    
+            # 清空已添加索引器列表
+            self._added_indexers = []
+            print(f"【{self.plugin_name}】共移除了 {removed_count} 个索引器")
+            
+        except Exception as e:
+            print(f"【{self.plugin_name}】移除Jackett索引器异常: {str(e)}")
+
     def _add_jackett_indexers(self):
         """
         添加Jackett索引器到MoviePilot V2内建索引器
@@ -403,96 +432,33 @@ class JackettV2(_PluginBase):
             
             print(f"【{self.plugin_name}】共添加了{len(self._added_indexers)}个索引器")
             
-            # 尝试不同的刷新方法
+            # 尝试刷新索引器
             try:
-                # 尝试使用refresh_indexer方法
-                if hasattr(sites_helper, 'refresh_indexer'):
-                    sites_helper.refresh_indexer()
-                    print(f"【{self.plugin_name}】使用refresh_indexer方法刷新成功")
                 # 尝试使用refresh方法
-                elif hasattr(sites_helper, 'refresh'):
+                if hasattr(sites_helper, 'refresh'):
                     sites_helper.refresh()
                     print(f"【{self.plugin_name}】使用refresh方法刷新成功")
-                # 尝试使用init_indexer方法
-                elif hasattr(sites_helper, 'init_indexer'):
-                    sites_helper.init_indexer()
-                    print(f"【{self.plugin_name}】使用init_indexer方法刷新成功")
-                # 尝试直接修改配置文件时间戳来触发重载
-                else:
-                    import os
-                    config_file = "/config/sites.json"
-                    if os.path.exists(config_file):
-                        os.utime(config_file, None)
-                        print(f"【{self.plugin_name}】已更新配置文件时间戳以触发重载")
+                    return
                     
-                    # 尝试修改数据库文件时间戳
-                    db_file = "/config/user.db"
-                    if os.path.exists(db_file):
-                        os.utime(db_file, None)
-                        print(f"【{self.plugin_name}】已更新数据库文件时间戳以触发重载")
+                # 尝试修改配置文件时间戳来触发重载
+                config_file = "/config/sites.json"
+                if os.path.exists(config_file):
+                    os.utime(config_file, None)
+                    print(f"【{self.plugin_name}】已更新配置文件时间戳以触发重载")
+                    
+                # 尝试修改数据库文件时间戳
+                db_file = "/config/user.db"
+                if os.path.exists(db_file):
+                    os.utime(db_file, None)
+                    print(f"【{self.plugin_name}】已更新数据库文件时间戳以触发重载")
+                    
             except Exception as e:
                 print(f"【{self.plugin_name}】刷新索引器失败: {str(e)}")
                 
-            # 尝试通过服务类刷新站点
-            try:
-                # 尝试导入并使用IndexerService
-                try:
-                    from app.modules.indexer import IndexerService
-                    indexer_service = IndexerService()
-                    if hasattr(indexer_service, 'init'):
-                        indexer_service.init()
-                        print(f"【{self.plugin_name}】使用IndexerService.init方法刷新成功")
-                    elif hasattr(indexer_service, 'refresh'):
-                        indexer_service.refresh()
-                        print(f"【{self.plugin_name}】使用IndexerService.refresh方法刷新成功")
-                except Exception as e:
-                    print(f"【{self.plugin_name}】使用IndexerService刷新失败: {str(e)}")
-                
-                # 尝试导入并使用SitesService
-                try:
-                    from app.modules.sites import SitesService
-                    sites_service = SitesService()
-                    if hasattr(sites_service, 'init'):
-                        sites_service.init()
-                        print(f"【{self.plugin_name}】使用SitesService.init方法刷新成功")
-                    elif hasattr(sites_service, 'refresh'):
-                        sites_service.refresh()
-                        print(f"【{self.plugin_name}】使用SitesService.refresh方法刷新成功")
-                except Exception as e:
-                    print(f"【{self.plugin_name}】使用SitesService刷新失败: {str(e)}")
-                
-            except Exception as e:
-                print(f"【{self.plugin_name}】尝试使用服务类刷新失败: {str(e)}")
-            
         except Exception as e:
             print(f"【{self.plugin_name}】添加Jackett索引器异常: {str(e)}")
             import traceback
             print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
-
-    def _remove_jackett_indexers(self):
-        """
-        从MoviePilot V2中移除Jackett索引器
-        """
-        try:
-            from app.helper.sites import SitesHelper
-            sites_helper = SitesHelper()
-            
-            # 移除已添加的索引器
-            removed_count = 0
-            for domain in self._added_indexers:
-                try:
-                    sites_helper.remove_indexer(domain=domain)
-                    removed_count += 1
-                    print(f"【{self.plugin_name}】成功移除索引器: {domain}")
-                except Exception as e:
-                    print(f"【{self.plugin_name}】移除索引器失败: {domain} - {str(e)}")
-                    
-            # 清空已添加索引器列表
-            self._added_indexers = []
-            print(f"【{self.plugin_name}】共移除了 {removed_count} 个索引器")
-            
-        except Exception as e:
-            print(f"【{self.plugin_name}】移除Jackett索引器异常: {str(e)}")
 
     def get_indexers(self):
         """
