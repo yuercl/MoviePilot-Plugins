@@ -19,7 +19,7 @@ class JackettV2(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.5"
+    plugin_version = "1.6"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -287,6 +287,8 @@ class JackettV2(_PluginBase):
                 "language": "zh_CN",
                 "category": categories,
                 "builtin": False,
+                "parser": "torznab",  # 指定使用torznab解析器
+                "priority": 1,  # 设置较高优先级
                 "search": {
                     "paths": [
                         {
@@ -298,7 +300,9 @@ class JackettV2(_PluginBase):
                         "t": "search",
                         "q": "{keyword}",
                         "cat": "{cat}",
-                        "apikey": self._api_key
+                        "apikey": self._api_key,
+                        "limit": 100,  # 增加搜索结果数量
+                        "extended": 1  # 启用扩展搜索
                     }
                 },
                 "torrents": {
@@ -312,8 +316,14 @@ class JackettV2(_PluginBase):
                         "title": {
                             "selector": "title"
                         },
+                        "description": {
+                            "selector": "description",
+                            "optional": True
+                        },
                         "details": {
-                            "selector": "guid"
+                            "selector": "comments",
+                            "optional": True,
+                            "default": "guid"
                         },
                         "download": {
                             "selector": "link"
@@ -322,8 +332,7 @@ class JackettV2(_PluginBase):
                             "selector": "size"
                         },
                         "date_added": {
-                            "selector": "pubDate",
-                            "optional": True
+                            "selector": "pubDate"
                         },
                         "seeders": {
                             "selector": "torznab|attr[name=seeders]",
@@ -333,14 +342,25 @@ class JackettV2(_PluginBase):
                             "selector": "torznab|attr[name=peers]",
                             "default": "0"
                         },
+                        "grabs": {
+                            "selector": "torznab|attr[name=grabs]",
+                            "optional": True,
+                            "default": "0"
+                        },
+                        "imdbid": {
+                            "selector": "torznab|attr[name=imdbid]",
+                            "optional": True
+                        },
                         "downloadvolumefactor": {
                             "case": {
-                                "*": 0
+                                "torznab|attr[name=downloadvolumefactor]": "0",
+                                "*": "1"
                             }
                         },
                         "uploadvolumefactor": {
                             "case": {
-                                "*": 1
+                                "torznab|attr[name=uploadvolumefactor]": "2",
+                                "*": "1"
                             }
                         }
                     }
@@ -492,33 +512,48 @@ class JackettV2(_PluginBase):
             # 等待1秒确保添加操作完成
             time.sleep(1)
             
-            # 尝试刷新索引器
+            # 尝试多种方式刷新索引器以确保立即生效
             try:
-                # 尝试使用refresh方法
+                # 1. 尝试使用refresh方法
                 if hasattr(sites_helper, 'refresh'):
                     sites_helper.refresh()
                     print(f"【{self.plugin_name}】使用refresh方法刷新成功")
-                    return
                 
-                # 尝试修改配置文件时间戳来触发重载
-                config_file = "/config/sites.json"
-                if os.path.exists(config_file):
-                    os.utime(config_file, None)
-                    print(f"【{self.plugin_name}】已更新配置文件时间戳以触发重载")
-                    
-                # 尝试修改数据库文件时间戳
-                db_file = "/config/user.db"
-                if os.path.exists(db_file):
-                    os.utime(db_file, None)
-                    print(f"【{self.plugin_name}】已更新数据库文件时间戳以触发重载")
-                    
-                # 尝试使用其他刷新方法
+                # 2. 尝试重新初始化索引器
                 if hasattr(sites_helper, 'init_indexer'):
                     sites_helper.init_indexer()
                     print(f"【{self.plugin_name}】使用init_indexer方法刷新成功")
+                
+                # 3. 尝试重新加载配置
                 if hasattr(sites_helper, 'load'):
                     sites_helper.load()
                     print(f"【{self.plugin_name}】使用load方法刷新成功")
+                
+                # 4. 修改配置文件时间戳触发重载
+                config_files = [
+                    "/config/sites.json",
+                    "/config/user.db",
+                    "/config/indexer.json"
+                ]
+                
+                for config_file in config_files:
+                    if os.path.exists(config_file):
+                        try:
+                            # 更新文件时间戳
+                            os.utime(config_file, None)
+                            print(f"【{self.plugin_name}】已更新{config_file}时间戳以触发重载")
+                            # 确保文件变更被检测到
+                            time.sleep(0.5)
+                        except Exception as e:
+                            print(f"【{self.plugin_name}】更新{config_file}时间戳失败: {str(e)}")
+                
+                # 5. 强制重新加载索引器配置
+                try:
+                    from app.utils.system import SystemUtils
+                    SystemUtils().reload()
+                    print(f"【{self.plugin_name}】已强制重新加载系统配置")
+                except Exception as e:
+                    print(f"【{self.plugin_name}】强制重新加载系统配置失败: {str(e)}")
                     
             except Exception as e:
                 print(f"【{self.plugin_name}】刷新索引器失败: {str(e)}")
