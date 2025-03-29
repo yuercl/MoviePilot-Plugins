@@ -22,9 +22,9 @@
   "JackettV2": {
     "name": "JackettV2",
     "description": "支持 Jackett 搜索器，将Jackett索引器添加到MoviePilot V2内建搜索器中。",
-    "version": "1.3",
+    "version": "1.4",
     "icon": "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico",
-    "author": "lightolly",
+    "author": "jason",
     "level": 2,
     "module": "jackettv2",
     "info": "专为MoviePilot V2版本设计的Jackett索引器插件，支持将Jackett中的所有索引器添加到MoviePilot的搜索系统中。",
