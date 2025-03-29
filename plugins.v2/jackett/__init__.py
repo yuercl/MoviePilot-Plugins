@@ -7,6 +7,8 @@ import time
 import xml.dom.minidom
 from urllib.parse import urljoin
 import requests
+import importlib
+import yaml
 
 class Jackett(_PluginBase):
     """
@@ -19,7 +21,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.50"
+    plugin_version = "1.52"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -432,6 +434,65 @@ class Jackett(_PluginBase):
                         print(f"【{self.plugin_name}】系统当前共有 {len(jackett_sites)} 个 Jackett 索引器: {jackett_sites}")
                     else:
                         print(f"【{self.plugin_name}】无法获取系统索引器列表")
+                    
+                    # 如果直接写入配置后发现索引器仍然为0，尝试触发系统直接重载
+                    if not jackett_sites or len(jackett_sites) == 0:
+                        print(f"【{self.plugin_name}】使用配置保存成功但索引器未激活，尝试执行系统重启操作...")
+                        try:
+                            # 尝试找到并调用系统重启接口
+                            for module_path in [
+                                "app.app", 
+                                "app.core.config", 
+                                "app.core.module", 
+                                "app.utils.system"
+                            ]:
+                                try:
+                                    module = importlib.import_module(module_path)
+                                    if hasattr(module, "restart") and callable(module.restart):
+                                        print(f"【{self.plugin_name}】找到系统重启方法: {module_path}.restart")
+                                        module.restart()
+                                        print(f"【{self.plugin_name}】已触发系统重启")
+                                        break
+                                    elif hasattr(module, "reboot") and callable(module.reboot):
+                                        print(f"【{self.plugin_name}】找到系统重启方法: {module_path}.reboot")
+                                        module.reboot()
+                                        print(f"【{self.plugin_name}】已触发系统重启")
+                                        break
+                                except (ImportError, AttributeError):
+                                    continue
+                        
+                            # 如果没有找到重启方法，尝试修改系统配置强制重新加载
+                            print(f"【{self.plugin_name}】尝试调整系统配置文件以触发重载...")
+                            
+                            try:
+                                import os
+                                import json
+                                
+                                # 尝试找到配置文件位置
+                                config_paths = [
+                                    "/config/user.yaml",
+                                    "/config/config.yaml",
+                                    "/app/config/user.yaml",
+                                    "/app/config/config.yaml"
+                                ]
+                                
+                                for config_path in config_paths:
+                                    if os.path.exists(config_path):
+                                        print(f"【{self.plugin_name}】找到配置文件: {config_path}")
+                                        # 修改配置文件的访问时间，可能触发系统监测到配置变化
+                                        try:
+                                            # 更新文件的访问和修改时间到当前时间
+                                            os.utime(config_path, None)
+                                            print(f"【{self.plugin_name}】已更新配置文件时间戳")
+                                        except Exception as e:
+                                            print(f"【{self.plugin_name}】更新配置文件时间戳失败: {str(e)}")
+                                        break
+                            except Exception as e:
+                                print(f"【{self.plugin_name}】尝试修改配置文件失败: {str(e)}")
+                            
+                            print(f"【{self.plugin_name}】强制激活操作完成，请重新检查索引器状态")
+                        except Exception as e:
+                            print(f"【{self.plugin_name}】尝试系统重载失败: {str(e)}")
                     
                 except Exception as e:
                     print(f"【{self.plugin_name}】尝试刷新索引器异常: {str(e)}")
@@ -1042,194 +1103,203 @@ class Jackett(_PluginBase):
             # 重新加载
             self._add_jackett_indexers()
             
-            # 尝试直接写入系统配置
+            # 获取Jackett索引器，确保所有数据最新
+            jackett_indexers = self._fetch_jackett_indexers()
+            all_indexers = []
+            for indexer in jackett_indexers:
+                formatted = self._format_indexer(indexer)
+                if formatted:
+                    all_indexers.append((formatted["id"], formatted))
+            
+            # 尝试通过多种方式写入系统配置
+            write_success = False
+            
+            # 1. 尝试使用SystemConfigOper
             try:
                 from app.db.systemconfig_oper import SystemConfigOper
                 from app.schemas.types import SystemConfigKey
                 
                 # 获取当前索引器配置 - 兼容不同版本
                 config_oper = SystemConfigOper()
-                indexers_config = {}
                 
-                # 尝试不同的配置键名
+                # 探测系统配置键
+                config_keys = []
                 try:
-                    # 尝试V2版本键名
-                    if hasattr(SystemConfigKey, "UserIndexer"):
-                        indexers_config = config_oper.get(SystemConfigKey.UserIndexer) or {}
-                        print(f"【{self.plugin_name}】使用SystemConfigKey.UserIndexer获取配置")
-                    # 尝试其他可能的键名
-                    elif hasattr(SystemConfigKey, "INDEXER"):
-                        indexers_config = config_oper.get(SystemConfigKey.INDEXER) or {}
-                        print(f"【{self.plugin_name}】使用SystemConfigKey.INDEXER获取配置")
-                    elif hasattr(SystemConfigKey, "Indexer"):
-                        indexers_config = config_oper.get(SystemConfigKey.Indexer) or {}
-                        print(f"【{self.plugin_name}】使用SystemConfigKey.Indexer获取配置")
-                    else:
-                        # 尝试使用字符串直接访问
-                        for possible_key in ["UserIndexer", "INDEXER", "Indexer", "indexer"]:
-                            try:
-                                indexers_config = config_oper.get(possible_key) or {}
-                                if indexers_config:
-                                    print(f"【{self.plugin_name}】使用字符串键'{possible_key}'成功获取配置")
-                                    break
-                            except Exception:
-                                continue
+                    for attr in dir(SystemConfigKey):
+                        if not attr.startswith('_'):
+                            config_keys.append(attr)
+                    print(f"【{self.plugin_name}】系统配置键: {config_keys}")
                 except Exception as e:
-                    print(f"【{self.plugin_name}】获取系统配置异常: {str(e)}")
-                    indexers_config = {}
+                    print(f"【{self.plugin_name}】无法获取SystemConfigKey枚举: {str(e)}")
                 
-                print(f"【{self.plugin_name}】当前系统索引器配置: {len(indexers_config)} 个索引器")
-                
-                # 直接获取所有已格式化的索引器
-                all_indexers = []
-                jackett_indexers = self._fetch_jackett_indexers()
-                for indexer in jackett_indexers:
-                    formatted = self._format_indexer(indexer)
-                    if formatted:
-                        all_indexers.append((formatted["id"], formatted))
-                
-                # 清除已有的Jackett索引器
-                jackett_keys = [k for k in indexers_config.keys() if k.startswith("jackett_")]
-                for key in jackett_keys:
-                    if key in indexers_config:
-                        del indexers_config[key]
-                
-                # 添加所有新格式化的Jackett索引器
-                for indexer_id, indexer_config in all_indexers:
-                    indexers_config[indexer_id] = indexer_config
-                
-                # 保存配置
-                save_success = False
-                        
-                try:
-                    if hasattr(SystemConfigKey, "UserIndexer"):
-                        config_oper.set(SystemConfigKey.UserIndexer, indexers_config)
-                        save_success = True
-                        print(f"【{self.plugin_name}】使用SystemConfigKey.UserIndexer保存配置")
-                    elif hasattr(SystemConfigKey, "INDEXER"):
-                        config_oper.set(SystemConfigKey.INDEXER, indexers_config)
-                        save_success = True
-                        print(f"【{self.plugin_name}】使用SystemConfigKey.INDEXER保存配置")
-                    elif hasattr(SystemConfigKey, "Indexer"):
-                        config_oper.set(SystemConfigKey.Indexer, indexers_config)
-                        save_success = True
-                        print(f"【{self.plugin_name}】使用SystemConfigKey.Indexer保存配置")
-                    else:
-                        # 尝试使用字符串直接保存
-                        for possible_key in ["UserIndexer", "INDEXER", "Indexer", "indexer"]:
-                            try:
-                                config_oper.set(possible_key, indexers_config)
-                                save_success = True
-                                print(f"【{self.plugin_name}】使用字符串键'{possible_key}'成功保存配置")
-                                break
-                            except Exception:
-                                continue
-                except Exception as e:
-                    print(f"【{self.plugin_name}】保存配置异常: {str(e)}")
-                    
-                if save_success:
-                    print(f"【{self.plugin_name}】成功直接写入 {len(all_indexers)} 个索引器到系统配置")
-                else:
-                    print(f"【{self.plugin_name}】尝试了所有可能的配置键，仍无法保存索引器配置")
-                
-                # 尝试发送刷新事件
-                try:
-                    # 尝试直接调用站点服务刷新
+                # 尝试所有可能的系统配置键
+                for key_name in ["UserIndexer", "INDEXER", "Indexer", "indexer"]:
                     try:
-                        from app.services.indexer import IndexerService
-                        print(f"【{self.plugin_name}】尝试直接调用站点服务刷新...")
-                        indexer_service = IndexerService()
+                        # 获取现有配置
+                        if hasattr(SystemConfigKey, key_name):
+                            key_obj = getattr(SystemConfigKey, key_name)
+                            indexers_config = config_oper.get(key_obj) or {}
+                        else:
+                            indexers_config = config_oper.get(key_name) or {}
                         
-                        # 尝试不同的刷新方法
-                        if hasattr(indexer_service, "init_builtin"):
-                            indexer_service.init_builtin()
-                            print(f"【{self.plugin_name}】成功调用站点服务init_builtin方法")
+                        # 清除已有的Jackett索引器
+                        jackett_keys = [k for k in indexers_config.keys() if k.startswith("jackett_")]
+                        for key in jackett_keys:
+                            if key in indexers_config:
+                                del indexers_config[key]
                         
-                        if hasattr(indexer_service, "init_indexer"):
-                            indexer_service.init_indexer()
-                            print(f"【{self.plugin_name}】成功调用站点服务init_indexer方法")
+                        # 添加新的Jackett索引器
+                        for indexer_id, indexer_config in all_indexers:
+                            indexers_config[indexer_id] = indexer_config
                         
-                        if hasattr(indexer_service, "refresh"):
-                            indexer_service.refresh()
-                            print(f"【{self.plugin_name}】成功调用站点服务refresh方法")
+                        # 保存配置
+                        if hasattr(SystemConfigKey, key_name):
+                            key_obj = getattr(SystemConfigKey, key_name)
+                            config_oper.set(key_obj, indexers_config)
+                        else:
+                            config_oper.set(key_name, indexers_config)
                         
-                        print(f"【{self.plugin_name}】站点服务刷新完成")
+                        print(f"【{self.plugin_name}】成功使用配置键 '{key_name}' 写入 {len(all_indexers)} 个索引器")
+                        write_success = True
+                        break
                     except Exception as e:
-                        print(f"【{self.plugin_name}】直接调用站点服务刷新失败: {str(e)}")
-                        import traceback
-                        print(f"【{self.plugin_name}】刷新异常详情: {traceback.format_exc()}")
-                    
-                    # 尝试发送模块重载事件
-                    from app.helper.event import EventManager
-                    from app.schemas.types import EventType
-                    
-                    print(f"【{self.plugin_name}】尝试发送模块重载事件...")
-                    event_manager = EventManager()
-                    event_manager.send_event(EventType.ModuleReload)
-                    print(f"【{self.plugin_name}】成功发送模块重载事件")
-                    
-                    # 尝试发送站点刷新事件
-                    event_manager.send_event(EventType.SiteRefreshed)
-                    print(f"【{self.plugin_name}】成功发送站点刷新事件")
-                except Exception as e:
-                    print(f"【{self.plugin_name}】发送刷新事件失败: {str(e)}")
-                
-                return {"code": 0, "message": f"重新加载索引器成功，共添加{len(all_indexers)}个索引器"}
-                
+                        print(f"【{self.plugin_name}】使用配置键 '{key_name}' 写入失败: {str(e)}")
             except Exception as e:
-                print(f"【{self.plugin_name}】直接写入系统配置失败: {str(e)}")
+                print(f"【{self.plugin_name}】使用SystemConfigOper写入失败: {str(e)}")
                 import traceback
                 print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
             
-            # 如果直接写入失败，回退到检查添加结果
-            try:
-                # 导入 SitesHelper
-                sites_helper = None
+            # 2. 尝试直接修改系统配置文件
+            if not write_success:
                 try:
-                    # 尝试 V2 版本的导入路径
-                    from app.helper.sites import SitesHelper
-                    sites_helper = SitesHelper()
-                except ImportError:
+                    import os
+                    import yaml
+                    
+                    # 查找配置文件
+                    config_paths = [
+                        "/config/user.yaml",
+                        "/config/config.yaml",
+                        "/app/config/user.yaml",
+                        "/app/config/config.yaml"
+                    ]
+                    
+                    for config_path in config_paths:
+                        if os.path.exists(config_path):
+                            print(f"【{self.plugin_name}】找到配置文件: {config_path}")
+                            
+                            # 读取配置
+                            with open(config_path, 'r', encoding='utf-8') as f:
+                                config_data = yaml.safe_load(f) or {}
+                            
+                            # 更新索引器配置
+                            if 'indexer' not in config_data:
+                                config_data['indexer'] = {}
+                            
+                            # 删除旧的Jackett索引器
+                            jackett_keys = [k for k in config_data['indexer'].keys() if k.startswith("jackett_")]
+                            for key in jackett_keys:
+                                if key in config_data['indexer']:
+                                    del config_data['indexer'][key]
+                            
+                            # 添加新的Jackett索引器
+                            for indexer_id, indexer_config in all_indexers:
+                                config_data['indexer'][indexer_id] = indexer_config
+                            
+                            # 保存配置
+                            try:
+                                with open(config_path, 'w', encoding='utf-8') as f:
+                                    yaml.dump(config_data, f, allow_unicode=True)
+                                print(f"【{self.plugin_name}】成功直接写入 {len(all_indexers)} 个索引器到配置文件")
+                                write_success = True
+                            except Exception as e:
+                                print(f"【{self.plugin_name}】写入配置文件失败: {str(e)}")
+                            
+                            break
+                except Exception as e:
+                    print(f"【{self.plugin_name}】直接修改配置文件失败: {str(e)}")
+                    import traceback
+                    print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
+            
+            # 尝试触发系统重载 - 如果找不到其他更好的导入方法，尝试通过其他服务接口
+            try:
+                # 尝试寻找可用的重启方法
+                restart_methods = [
+                    ("app.app", "restart"),
+                    ("app.core.config", "reload"),
+                    ("app.core.module", "restart"),
+                    ("app.utils.system", "reboot"),
+                    ("app.core.context", "restart_service")
+                ]
+                
+                for module_path, method_name in restart_methods:
                     try:
-                        # 尝试 V1 版本的导入路径
-                        from app.sites import SitesHelper
-                        sites_helper = SitesHelper()
-                    except ImportError as e:
-                        print(f"【{self.plugin_name}】导入SitesHelper失败: {str(e)}")
-                        return {"code": 0, "message": f"重新加载索引器成功，共添加{len(self._added_indexers)}个索引器，但无法验证状态"}
+                        module = importlib.import_module(module_path)
+                        if hasattr(module, method_name):
+                            method = getattr(module, method_name)
+                            if callable(method):
+                                print(f"【{self.plugin_name}】找到系统重载方法: {module_path}.{method_name}")
+                                method()
+                                print(f"【{self.plugin_name}】已触发系统重载")
+                                break
+                    except (ImportError, AttributeError):
+                        continue
                 
-                if not sites_helper:
-                    print(f"【{self.plugin_name}】无法创建SitesHelper实例")
-                    return {"code": 0, "message": f"重新加载索引器成功，共添加{len(self._added_indexers)}个索引器，但无法验证状态"}
-                
-                # 获取系统中的索引器
-                all_sites = []
-                if hasattr(sites_helper, "get_indexers"):
-                    all_sites = sites_helper.get_indexers() or []
-                elif hasattr(sites_helper, "get_all_indexers"):
-                    all_sites = sites_helper.get_all_indexers() or []
-                
-                # 检查Jackett索引器是否在列表中
-                jackett_sites = []
-                if isinstance(all_sites, dict):
-                    jackett_sites = [s for s in all_sites.keys() if isinstance(s, str) and s.startswith("jackett_")]
-                else:
-                    jackett_sites = [s for s in all_sites if isinstance(s, str) and s.startswith("jackett_")]
-                
-                if jackett_sites:
-                    print(f"【{self.plugin_name}】成功添加 {len(jackett_sites)} 个Jackett索引器: {jackett_sites}")
-                    return {"code": 0, "message": f"重新加载索引器成功，共添加{len(jackett_sites)}个索引器"}
-                else:
-                    print(f"【{self.plugin_name}】系统中未检测到Jackett索引器，可能添加失败")
-                    return {"code": 1, "message": "索引器添加失败，请检查日志"}
+                # 尝试通过触发文件系统变化来触发重载
+                try:
+                    import os
+                    import time
+                    
+                    # 寻找配置目录
+                    config_paths = [
+                        "/config",
+                        "/app/config",
+                        "/config/user.yaml",
+                        "/config/config.yaml"
+                    ]
+                    
+                    for path in config_paths:
+                        if os.path.exists(path):
+                            # 如果是文件，更新其访问和修改时间
+                            if os.path.isfile(path):
+                                try:
+                                    # 更新文件的访问和修改时间到当前时间
+                                    os.utime(path, None)
+                                    print(f"【{self.plugin_name}】已更新文件时间戳: {path}")
+                                except Exception as e:
+                                    print(f"【{self.plugin_name}】更新文件时间戳失败: {str(e)}")
+                            
+                            # 如果是目录，创建并删除临时文件来触发文件系统事件
+                            elif os.path.isdir(path):
+                                try:
+                                    temp_file = os.path.join(path, f".jackett_reload_{int(time.time())}")
+                                    with open(temp_file, 'w') as f:
+                                        f.write(f"Jackett reload trigger {time.time()}")
+                                    print(f"【{self.plugin_name}】已创建临时文件: {temp_file}")
+                                    time.sleep(2)  # 等待文件系统事件传播
+                                    if os.path.exists(temp_file):
+                                        os.remove(temp_file)
+                                        print(f"【{self.plugin_name}】已删除临时文件: {temp_file}")
+                                except Exception as e:
+                                    print(f"【{self.plugin_name}】创建/删除临时文件失败: {str(e)}")
+                            
+                            break
+                except Exception as e:
+                    print(f"【{self.plugin_name}】尝试通过文件系统触发重载失败: {str(e)}")
             except Exception as e:
-                print(f"【{self.plugin_name}】检查索引器状态异常: {str(e)}")
+                print(f"【{self.plugin_name}】触发系统重载失败: {str(e)}")
                 import traceback
-                print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
-                return {"code": 0, "message": f"重新加载索引器成功，共添加{len(self._added_indexers)}个索引器，但无法验证状态"}
+                print(f"【{self.plugin_name}】重载异常详情: {traceback.format_exc()}")
+            
+            # 返回成功消息
+            if write_success:
+                return {"code": 0, "message": f"重新加载索引器成功，共添加{len(all_indexers)}个索引器。系统可能需要重启才能生效。"}
+            else:
+                return {"code": 1, "message": "重新加载索引器失败，请检查日志。"}
                 
         except Exception as e:
             print(f"【{self.plugin_name}】重新加载索引器异常: {str(e)}")
+            import traceback
+            print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
             return {"code": 1, "message": f"重新加载索引器失败: {str(e)}"}
 
     def get_indexers(self):
