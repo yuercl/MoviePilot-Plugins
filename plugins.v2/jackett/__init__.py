@@ -21,7 +21,7 @@ class Jackett(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.52"
+    plugin_version = "1.60"
     # 插件作者
     plugin_author = "jason"
     # 作者主页
@@ -634,32 +634,7 @@ class Jackett(_PluginBase):
             indexer_id = jackett_indexer.get("id", "")
             indexer_name = jackett_indexer.get("name", "")
             
-            # 添加分类支持，使索引器支持影视搜索
-            # 使用通用的Torznab分类
-            category_config = {
-                "movie": [
-                    {"id": "2000", "desc": "Movies"},  # 电影主分类
-                    {"id": "2010", "desc": "Movies/Foreign"},
-                    {"id": "2020", "desc": "Movies/BluRay"},
-                    {"id": "2030", "desc": "Movies/DVD"},
-                    {"id": "2040", "desc": "Movies/HD"},
-                    {"id": "2045", "desc": "Movies/UHD"},
-                    {"id": "2050", "desc": "Movies/3D"},
-                    {"id": "2060", "desc": "Movies/SD"}
-                ],
-                "tv": [
-                    {"id": "5000", "desc": "TV"},  # 电视剧主分类
-                    {"id": "5020", "desc": "TV/Blu-ray"},
-                    {"id": "5030", "desc": "TV/DVD"},
-                    {"id": "5040", "desc": "TV/HD"},
-                    {"id": "5050", "desc": "TV/SD"},
-                    {"id": "5060", "desc": "TV/Foreign"},
-                    {"id": "5070", "desc": "TV/Sport"},
-                    {"id": "5080", "desc": "TV/Anime"}
-                ]
-            }
-            
-            # 使用MoviePilot支持的格式
+            # 使用最简单的索引器格式，只包含MoviePilot必须的字段
             mp_indexer = {
                 "id": f"jackett_{indexer_id.lower()}",
                 "name": f"[Jackett] {indexer_name}",
@@ -668,11 +643,6 @@ class Jackett(_PluginBase):
                 "encoding": "UTF-8",
                 "public": True,
                 "proxy": True,
-                "language": "zh_CN",  # 添加默认语言
-                "category": category_config,  # 添加分类
-                "builtin": False,  # 非内置
-                "result_type": "json",  # 结果类型
-                "parse": "xml",  # 解析类型
                 "search": {
                     "paths": [
                         {
@@ -683,7 +653,6 @@ class Jackett(_PluginBase):
                     "params": {
                         "t": "search",
                         "q": "{keyword}",
-                        "cat": "{cat}",  # 添加分类参数
                         "apikey": self._api_key
                     }
                 },
@@ -692,24 +661,14 @@ class Jackett(_PluginBase):
                         "selector": "item"
                     },
                     "fields": {
-                        "id": {
-                            "selector": "guid"
-                        },
                         "title": {
                             "selector": "title"
-                        },
-                        "details": {
-                            "selector": "guid"
                         },
                         "download": {
                             "selector": "link"
                         },
                         "size": {
                             "selector": "size"
-                        },
-                        "date_added": {
-                            "selector": "pubDate",
-                            "optional": True
                         },
                         "seeders": {
                             "selector": "torznab|attr[name=seeders]",
@@ -718,20 +677,6 @@ class Jackett(_PluginBase):
                         "leechers": {
                             "selector": "torznab|attr[name=peers]",
                             "default": "0"
-                        },
-                        "grabs": {
-                            "selector": "torznab|attr[name=grabs]",
-                            "default": "0"
-                        },
-                        "downloadvolumefactor": {
-                            "case": {
-                                "*": 0
-                            }
-                        },
-                        "uploadvolumefactor": {
-                            "case": {
-                                "*": 1
-                            }
                         }
                     }
                 }
@@ -1187,33 +1132,72 @@ class Jackett(_PluginBase):
                         if os.path.exists(config_path):
                             print(f"【{self.plugin_name}】找到配置文件: {config_path}")
                             
+                            # 检查写权限
+                            if not os.access(config_path, os.W_OK):
+                                print(f"【{self.plugin_name}】配置文件无写权限: {config_path}")
+                                continue
+                                
+                            # 备份文件
+                            backup_path = f"{config_path}.bak.{int(time.time())}"
+                            try:
+                                with open(config_path, 'r', encoding='utf-8') as f:
+                                    content = f.read()
+                                with open(backup_path, 'w', encoding='utf-8') as f:
+                                    f.write(content)
+                                print(f"【{self.plugin_name}】已创建配置文件备份: {backup_path}")
+                            except Exception as e:
+                                print(f"【{self.plugin_name}】创建备份失败: {str(e)}")
+                            
                             # 读取配置
-                            with open(config_path, 'r', encoding='utf-8') as f:
-                                config_data = yaml.safe_load(f) or {}
+                            try:
+                                with open(config_path, 'r', encoding='utf-8') as f:
+                                    config_data = yaml.safe_load(f) or {}
+                            except Exception as e:
+                                print(f"【{self.plugin_name}】读取配置文件失败: {str(e)}")
+                                continue
                             
-                            # 更新索引器配置
-                            if 'indexer' not in config_data:
-                                config_data['indexer'] = {}
+                            # 添加索引器
+                            indexer_section = None
+                            for section_name in ['indexer', 'INDEXER', 'Indexer', 'UserIndexer', 'user_indexer']:
+                                if section_name in config_data:
+                                    indexer_section = section_name
+                                    break
                             
-                            # 删除旧的Jackett索引器
-                            jackett_keys = [k for k in config_data['indexer'].keys() if k.startswith("jackett_")]
-                            for key in jackett_keys:
-                                if key in config_data['indexer']:
-                                    del config_data['indexer'][key]
+                            if not indexer_section:
+                                # 没有找到索引器部分，创建一个
+                                indexer_section = 'indexer'
+                                config_data[indexer_section] = {}
+                                print(f"【{self.plugin_name}】在配置中创建新的索引器部分: {indexer_section}")
                             
-                            # 添加新的Jackett索引器
-                            for indexer_id, indexer_config in all_indexers:
-                                config_data['indexer'][indexer_id] = indexer_config
+                            # 准备所有索引器
+                            indexer_count = 0
+                            for indexer in indexers:
+                                formatted = self._format_indexer(indexer)
+                                if formatted:
+                                    indexer_id = formatted["id"]
+                                    config_data[indexer_section][indexer_id] = formatted
+                                    indexer_count += 1
+                            
+                            print(f"【{self.plugin_name}】添加了 {indexer_count} 个索引器到配置")
                             
                             # 保存配置
                             try:
+                                # 使用yaml保存
                                 with open(config_path, 'w', encoding='utf-8') as f:
                                     yaml.dump(config_data, f, allow_unicode=True)
-                                print(f"【{self.plugin_name}】成功直接写入 {len(all_indexers)} 个索引器到配置文件")
-                                write_success = True
+                                print(f"【{self.plugin_name}】成功保存配置文件")
+                                
+                                # 修改文件时间戳，确保系统检测到变化
+                                os.utime(config_path, None)
+                                print(f"【{self.plugin_name}】已更新配置文件时间戳")
+                                
+                                # 尝试触发重启
+                                self._try_restart_system()
+                                
+                                return True
                             except Exception as e:
-                                print(f"【{self.plugin_name}】写入配置文件失败: {str(e)}")
-                            
+                                print(f"【{self.plugin_name}】保存配置文件失败: {str(e)}")
+                                
                             break
                 except Exception as e:
                     print(f"【{self.plugin_name}】直接修改配置文件失败: {str(e)}")
@@ -1239,7 +1223,7 @@ class Jackett(_PluginBase):
                             if callable(method):
                                 print(f"【{self.plugin_name}】找到系统重载方法: {module_path}.{method_name}")
                                 method()
-                                print(f"【{self.plugin_name}】已触发系统重载")
+                                print(f"【{self.plugin_name}】已触发系统重启")
                                 break
                     except (ImportError, AttributeError):
                         continue
@@ -1487,4 +1471,332 @@ class Jackett(_PluginBase):
             "trigger": "interval",
             "func": self._add_jackett_indexers,
             "kwargs": {"hours": 12}
-        }] 
+        }]
+
+    def _direct_register_indexers(self, indexers):
+        """
+        直接向MoviePilot核心注册索引器
+        """
+        print(f"【{self.plugin_name}】尝试直接修改核心应用中的索引器...")
+        
+        # 尝试找到并直接操作MoviePilot的索引器模块
+        try:
+            import importlib
+            import os
+            import json
+            
+            # 格式化所有需要的索引器
+            formatted_indexers = {}
+            for indexer in indexers:
+                if self._indexers and indexer.get("id") not in self._indexers:
+                    continue
+                    
+                formatted = self._format_indexer(indexer)
+                if formatted:
+                    indexer_id = formatted["id"]
+                    formatted_indexers[indexer_id] = formatted
+                    
+            if not formatted_indexers:
+                print(f"【{self.plugin_name}】没有有效的索引器可添加")
+                return
+                
+            print(f"【{self.plugin_name}】准备添加 {len(formatted_indexers)} 个索引器")
+            
+            # 将索引器信息写入临时文件，方便核心应用读取
+            temp_dir = "/tmp"
+            if not os.path.exists(temp_dir):
+                temp_dir = "."
+                
+            temp_file = os.path.join(temp_dir, f"jackett_indexers_{int(time.time())}.json")
+            try:
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    json.dump(formatted_indexers, f, ensure_ascii=False)
+                print(f"【{self.plugin_name}】已将索引器信息写入临时文件: {temp_file}")
+            except Exception as e:
+                print(f"【{self.plugin_name}】写入临时文件失败: {str(e)}")
+                
+            # 尝试找到配置文件路径
+            config_dir = None
+            for path in ["/config", "/app/config", "/data/config"]:
+                if os.path.exists(path) and os.path.isdir(path):
+                    config_dir = path
+                    break
+                    
+            if not config_dir:
+                print(f"【{self.plugin_name}】未找到配置目录")
+                return
+                
+            # 创建一个触发文件通知系统重载索引器
+            trigger_file = os.path.join(config_dir, ".load_jackett_indexers")
+            try:
+                with open(trigger_file, 'w', encoding='utf-8') as f:
+                    f.write(temp_file)
+                print(f"【{self.plugin_name}】已创建触发文件: {trigger_file}")
+            except Exception as e:
+                print(f"【{self.plugin_name}】创建触发文件失败: {str(e)}")
+                
+            # 修改触发文件的时间戳
+            try:
+                os.utime(trigger_file, None)
+                print(f"【{self.plugin_name}】已更新触发文件时间戳")
+            except Exception as e:
+                print(f"【{self.plugin_name}】更新触发文件时间戳失败: {str(e)}")
+            
+            # 尝试导入并直接调用系统服务
+            try:
+                print(f"【{self.plugin_name}】尝试获取Movie Pilot运行模式...")
+                try:
+                    # 尝试获取系统运行模式
+                    from app.utils.commons import RUNTIME_ENV
+                    print(f"【{self.plugin_name}】系统运行模式: {RUNTIME_ENV}")
+                except ImportError:
+                    print(f"【{self.plugin_name}】无法获取系统运行模式")
+                
+                # 尝试直接创建数据库连接添加索引器
+                try:
+                    # 导入数据库操作类
+                    print(f"【{self.plugin_name}】尝试通过数据库添加索引器...")
+                    
+                    # 尝试多种可能的导入路径
+                    db_class = None
+                    for module_path in [
+                        "app.db.systemconfig_oper", 
+                        "app.helper.db", 
+                        "app.db",
+                        "app.modules.database"
+                    ]:
+                        try:
+                            module = importlib.import_module(module_path)
+                            if hasattr(module, "SystemConfigOper"):
+                                db_class = module.SystemConfigOper
+                                print(f"【{self.plugin_name}】找到系统配置操作类: {module_path}.SystemConfigOper")
+                                break
+                        except ImportError:
+                            continue
+                    
+                    if db_class:
+                        # 创建实例
+                        db_instance = db_class()
+                        
+                        # 尝试获取系统配置键
+                        config_keys = []
+                        try:
+                            from app.schemas.types import SystemConfigKey
+                            for attr in dir(SystemConfigKey):
+                                if not attr.startswith('_'):
+                                    config_keys.append(attr)
+                            print(f"【{self.plugin_name}】系统配置键: {config_keys}")
+                        except ImportError:
+                            print(f"【{self.plugin_name}】无法导入SystemConfigKey")
+                        
+                        # 尝试通过数据库直接写入配置
+                        for key_name in ["UserIndexer", "INDEXER", "Indexer", "indexer"]:
+                            try:
+                                # 获取现有配置
+                                existing_config = {}
+                                if hasattr(db_instance, "get") and callable(db_instance.get):
+                                    try:
+                                        from app.schemas.types import SystemConfigKey
+                                        if hasattr(SystemConfigKey, key_name):
+                                            key_obj = getattr(SystemConfigKey, key_name)
+                                            existing_config = db_instance.get(key_obj) or {}
+                                            print(f"【{self.plugin_name}】使用SystemConfigKey.{key_name}获取配置")
+                                        else:
+                                            existing_config = db_instance.get(key_name) or {}
+                                            print(f"【{self.plugin_name}】使用字符串键'{key_name}'获取配置")
+                                    except Exception as e:
+                                        print(f"【{self.plugin_name}】获取配置失败: {str(e)}")
+                                
+                                # 添加新索引器
+                                for indexer_id, indexer_data in formatted_indexers.items():
+                                    existing_config[indexer_id] = indexer_data
+                                
+                                # 保存配置
+                                if hasattr(db_instance, "set") and callable(db_instance.set):
+                                    try:
+                                        from app.schemas.types import SystemConfigKey
+                                        if hasattr(SystemConfigKey, key_name):
+                                            key_obj = getattr(SystemConfigKey, key_name)
+                                            db_instance.set(key_obj, existing_config)
+                                            print(f"【{self.plugin_name}】使用SystemConfigKey.{key_name}保存配置")
+                                        else:
+                                            db_instance.set(key_name, existing_config)
+                                            print(f"【{self.plugin_name}】使用字符串键'{key_name}'保存配置")
+                                        
+                                        print(f"【{self.plugin_name}】成功保存索引器到数据库")
+                                        break
+                                    except Exception as e:
+                                        print(f"【{self.plugin_name}】保存配置失败: {str(e)}")
+                            except Exception as e:
+                                print(f"【{self.plugin_name}】使用键'{key_name}'操作失败: {str(e)}")
+                    else:
+                        print(f"【{self.plugin_name}】未找到系统配置操作类")
+                
+                except Exception as e:
+                    print(f"【{self.plugin_name}】通过数据库添加索引器失败: {str(e)}")
+                    import traceback
+                    print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
+                
+            except Exception as e:
+                print(f"【{self.plugin_name}】尝试通过系统服务添加索引器失败: {str(e)}")
+                import traceback
+                print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
+            
+        except Exception as e:
+            print(f"【{self.plugin_name}】尝试直接注册索引器失败: {str(e)}")
+            import traceback
+            print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
+            
+    def _direct_modify_config_file(self, indexers):
+        """
+        直接修改MoviePilot配置文件来添加索引器
+        """
+        print(f"【{self.plugin_name}】尝试直接修改系统配置文件...")
+        try:
+            import os
+            import yaml
+            import json
+            import time
+            
+            # 查找配置文件
+            config_paths = [
+                "/config/user.yaml",
+                "/config/config.yaml",
+                "/app/config/user.yaml", 
+                "/app/config/config.yaml"
+            ]
+            
+            for config_path in config_paths:
+                if os.path.exists(config_path):
+                    print(f"【{self.plugin_name}】找到配置文件: {config_path}")
+                    
+                    # 检查写权限
+                    if not os.access(config_path, os.W_OK):
+                        print(f"【{self.plugin_name}】配置文件无写权限: {config_path}")
+                        continue
+                        
+                    # 备份文件
+                    backup_path = f"{config_path}.bak.{int(time.time())}"
+                    try:
+                        with open(config_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        with open(backup_path, 'w', encoding='utf-8') as f:
+                            f.write(content)
+                        print(f"【{self.plugin_name}】已创建配置文件备份: {backup_path}")
+                    except Exception as e:
+                        print(f"【{self.plugin_name}】创建备份失败: {str(e)}")
+                    
+                    # 读取配置
+                    try:
+                        with open(config_path, 'r', encoding='utf-8') as f:
+                            config_data = yaml.safe_load(f) or {}
+                    except Exception as e:
+                        print(f"【{self.plugin_name}】读取配置文件失败: {str(e)}")
+                        continue
+                    
+                    # 添加索引器
+                    indexer_section = None
+                    for section_name in ['indexer', 'INDEXER', 'Indexer', 'UserIndexer', 'user_indexer']:
+                        if section_name in config_data:
+                            indexer_section = section_name
+                            break
+                    
+                    if not indexer_section:
+                        # 没有找到索引器部分，创建一个
+                        indexer_section = 'indexer'
+                        config_data[indexer_section] = {}
+                        print(f"【{self.plugin_name}】在配置中创建新的索引器部分: {indexer_section}")
+                    
+                    # 准备所有索引器
+                    indexer_count = 0
+                    for indexer in indexers:
+                        formatted = self._format_indexer(indexer)
+                        if formatted:
+                            indexer_id = formatted["id"]
+                            config_data[indexer_section][indexer_id] = formatted
+                            indexer_count += 1
+                    
+                    print(f"【{self.plugin_name}】添加了 {indexer_count} 个索引器到配置")
+                    
+                    # 保存配置
+                    try:
+                        # 使用yaml保存
+                        with open(config_path, 'w', encoding='utf-8') as f:
+                            yaml.dump(config_data, f, allow_unicode=True)
+                        print(f"【{self.plugin_name}】成功保存配置文件")
+                        
+                        # 修改文件时间戳，确保系统检测到变化
+                        os.utime(config_path, None)
+                        print(f"【{self.plugin_name}】已更新配置文件时间戳")
+                        
+                        # 尝试触发重启
+                        self._try_restart_system()
+                        
+                        return True
+                    except Exception as e:
+                        print(f"【{self.plugin_name}】保存配置文件失败: {str(e)}")
+                        
+            print(f"【{self.plugin_name}】未找到可写的配置文件")
+            return False
+            
+        except Exception as e:
+            print(f"【{self.plugin_name}】直接修改配置文件异常: {str(e)}")
+            import traceback
+            print(f"【{self.plugin_name}】异常详情: {traceback.format_exc()}")
+            return False
+    
+    def _try_restart_system(self):
+        """
+        尝试重启系统
+        """
+        print(f"【{self.plugin_name}】尝试重启系统以刷新索引器...")
+        try:
+            import sys
+            import signal
+            import os
+            
+            # 尝试导入系统重启方法
+            try:
+                import importlib
+                for module_path in [
+                    'app.utils.system',
+                    'app.core.system',
+                    'app.app',
+                    'app',
+                    'main'
+                ]:
+                    try:
+                        module = importlib.import_module(module_path)
+                        for method_name in ['restart', 'reboot', 'reload']:
+                            if hasattr(module, method_name):
+                                restart_method = getattr(module, method_name)
+                                if callable(restart_method):
+                                    print(f"【{self.plugin_name}】找到系统重启方法: {module_path}.{method_name}")
+                                    restart_method()
+                                    print(f"【{self.plugin_name}】已触发系统重启")
+                                    return True
+                    except (ImportError, AttributeError):
+                        continue
+            except Exception as e:
+                print(f"【{self.plugin_name}】尝试导入重启方法失败: {str(e)}")
+            
+            # 尝试通过进程信号重启
+            print(f"【{self.plugin_name}】尝试通过进程信号重启系统...")
+            try:
+                # 检查是否在容器内
+                if os.path.exists('/.dockerenv'):
+                    # 尝试发送SIGHUP信号通知系统重载
+                    os.kill(1, signal.SIGHUP)
+                    print(f"【{self.plugin_name}】已发送SIGHUP信号到PID 1")
+                else:
+                    # 尝试发送重载信号到当前进程
+                    os.kill(os.getpid(), signal.SIGHUP)
+                    print(f"【{self.plugin_name}】已发送SIGHUP信号到当前进程")
+                return True
+            except Exception as e:
+                print(f"【{self.plugin_name}】通过进程信号重启失败: {str(e)}")
+            
+            return False
+        except Exception as e:
+            print(f"【{self.plugin_name}】尝试重启系统异常: {str(e)}")
+            return False 
