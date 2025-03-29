@@ -18,5 +18,19 @@
       "1.03": "简化插件代码，移除事件注册功能，增加日志信息，修复配置问题",
       "1.01": "完成基础功能"
     }
+  },
+  "JackettV2": {
+    "name": "JackettV2",
+    "description": "支持 Jackett 搜索器，将Jackett索引器添加到MoviePilot V2内建搜索器中。",
+    "version": "1.0",
+    "icon": "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico",
+    "author": "lightolly",
+    "level": 2,
+    "module": "jackettv2",
+    "info": "专为MoviePilot V2版本设计的Jackett索引器插件，支持将Jackett中的所有索引器添加到MoviePilot的搜索系统中。",
+    "tags": ["搜索", "下载", "站点"],
+    "support": {
+      "version": ">=2.0.0"
+    }
   }
 } 
