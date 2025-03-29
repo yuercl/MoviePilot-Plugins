@@ -19,7 +19,7 @@ class JackettV2(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico"
     # 插件版本
-    plugin_version = "1.3"
+    plugin_version = "1.4"
     # 插件作者
     plugin_author = "lightolly"
     # 作者主页
@@ -439,7 +439,7 @@ class JackettV2(_PluginBase):
                     sites_helper.refresh()
                     print(f"【{self.plugin_name}】使用refresh方法刷新成功")
                     return
-                    
+                
                 # 尝试修改配置文件时间戳来触发重载
                 config_file = "/config/sites.json"
                 if os.path.exists(config_file):
@@ -451,6 +451,16 @@ class JackettV2(_PluginBase):
                 if os.path.exists(db_file):
                     os.utime(db_file, None)
                     print(f"【{self.plugin_name}】已更新数据库文件时间戳以触发重载")
+                    
+                # 尝试使用SitesHelper的其他方法
+                if hasattr(sites_helper, 'init_indexer'):
+                    sites_helper.init_indexer()
+                    print(f"【{self.plugin_name}】使用init_indexer方法刷新成功")
+                    
+                # 尝试使用SitesHelper的load方法
+                if hasattr(sites_helper, 'load'):
+                    sites_helper.load()
+                    print(f"【{self.plugin_name}】使用load方法刷新成功")
                     
             except Exception as e:
                 print(f"【{self.plugin_name}】刷新索引器失败: {str(e)}")
