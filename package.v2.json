@@ -26,6 +26,7 @@
     "icon": "https://raw.githubusercontent.com/Jackett/Jackett/master/src/Jackett.Common/Content/favicon.ico",
     "author": "jason",
     "level": 2,
+    "v2": true,
     "module": "jackettv2",
     "info": "专为MoviePilot V2版本设计的Jackett索引器插件，支持将Jackett中的所有索引器添加到MoviePilot的搜索系统中。",
     "tags": ["搜索", "下载", "站点"],
